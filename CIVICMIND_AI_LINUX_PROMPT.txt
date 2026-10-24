@@ -1,0 +1,1998 @@
+Please build the complete "CivicMind AI" (Predict • Prioritize • Prevent) full-stack web application in this workspace from scratch.
+
+This application is an AI-powered Civic Issue reporting and management platform designed for India, featuring:
+1. FastAPI + SQLite backend with JWT authentication (Citizen, Manager, Admin roles)
+2. Scikit-learn AI: NLP text classification (routing issues to departments) and DBSCAN spatial clustering (detecting complaint hotspots)
+3. React + Vite + Tailwind CSS frontend with React-Leaflet GIS mapping, HTML5 Geolocation API, OpenStreetMap reverse geocoding to human-readable street addresses, and live webcam + photo upload capability
+4. Toast notifications, form validation, expandable accordion details cards, 24-hr Railway time format, dual-tab Sign In / Sign Up portal with full citizen profiling (FirstName, LastName, Contact Number, Email, Password, Occupation), and a comprehensive Admin Master Control Panel.
+
+Please create the following files and directories with the exact code provided below:
+
+================================================================================
+FILE: requirements.txt
+================================================================================
+fastapi==0.110.0
+uvicorn==0.28.0
+sqlalchemy==2.0.28
+scikit-learn==1.4.1.post1
+numpy==1.26.4
+pydantic==2.6.4
+passlib==1.7.4
+bcrypt==4.1.2
+pyjwt==2.8.0
+python-multipart==0.0.9
+
+================================================================================
+FILE: backend/database.py
+================================================================================
+from sqlalchemy import create_engine
+from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import sessionmaker
+
+SQLALCHEMY_DATABASE_URL = "sqlite:///./civic_app.db"
+
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+================================================================================
+FILE: backend/models.py
+================================================================================
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Float, DateTime
+from sqlalchemy.orm import relationship
+import datetime
+from .database import Base
+
+class Department(Base):
+    __tablename__ = "departments"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True)
+    
+    users = relationship("User", back_populates="department")
+    complaints = relationship("Complaint", back_populates="department")
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String)
+    first_name = Column(String, nullable=True)
+    last_name = Column(String, nullable=True)
+    contact_number = Column(String, nullable=True)
+    occupation = Column(String, nullable=True)
+    email = Column(String, unique=True, index=True)
+    password_hash = Column(String)
+    role = Column(String, default="CITIZEN") # CITIZEN, OFFICER, HEAD, ADMIN
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    
+    department = relationship("Department", back_populates="users")
+    complaints = relationship("Complaint", back_populates="citizen")
+
+class Complaint(Base):
+    __tablename__ = "complaints"
+    id = Column(Integer, primary_key=True, index=True)
+    citizen_id = Column(Integer, ForeignKey("users.id"))
+    description = Column(String)
+    address = Column(String, nullable=True)
+    image_url = Column(String, nullable=True)
+    latitude = Column(Float)
+    longitude = Column(Float)
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    status = Column(String, default="Pending") # Pending, In Progress, Resolved
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    
+    citizen = relationship("User", back_populates="complaints")
+    department = relationship("Department", back_populates="complaints")
+
+class Hotspot(Base):
+    __tablename__ = "hotspots"
+    id = Column(Integer, primary_key=True, index=True)
+    center_latitude = Column(Float)
+    center_longitude = Column(Float)
+    complaint_count = Column(Integer)
+    severity = Column(String)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+================================================================================
+FILE: backend/main.py
+================================================================================
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from .database import engine, Base
+from .routes import auth, complaints, dashboard
+from .ai import nlp_classifier, hotspot_detector
+
+# Create database tables
+Base.metadata.create_all(bind=engine)
+
+# Auto-migrate SQLite schema
+with engine.connect() as conn:
+    for col, col_type in [
+        ("first_name", "VARCHAR"),
+        ("last_name", "VARCHAR"),
+        ("contact_number", "VARCHAR"),
+        ("occupation", "VARCHAR"),
+    ]:
+        try:
+            conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {col_type}"))
+            conn.commit()
+        except Exception:
+            pass
+
+    try:
+        conn.execute(text("ALTER TABLE complaints ADD COLUMN address VARCHAR"))
+        conn.commit()
+    except Exception:
+        pass
+
+app = FastAPI(title="Civic Complaint API")
+
+# Configure CORS for React frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include routers
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(complaints.router, prefix="/api/complaints", tags=["complaints"])
+app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
+
+@app.get("/")
+def read_root():
+    return {"message": "Civic Complaint API is running"}
+
+================================================================================
+FILE: backend/ai/nlp_classifier.py
+================================================================================
+import os
+import pickle
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.pipeline import make_pipeline
+
+from ..models import Department
+
+MODEL_PATH = "nlp_model.pkl"
+
+TRAINING_DATA = [
+    ("huge pothole on the road", "Roads"),
+    ("street light is broken", "Electricity"),
+    ("power outage in my area", "Electricity"),
+    ("water pipe burst leaking water everywhere", "Water & Sanitation"),
+    ("garbage is not collected for days", "Waste Management"),
+    ("road is cracked and dangerous", "Roads"),
+    ("drainage is overflowing on the street", "Water & Sanitation")
+]
+
+def train_and_save_model():
+    texts = [item[0] for item in TRAINING_DATA]
+    labels = [item[1] for item in TRAINING_DATA]
+    
+    model = make_pipeline(TfidfVectorizer(), MultinomialNB())
+    model.fit(texts, labels)
+    
+    with open(MODEL_PATH, "wb") as f:
+        pickle.dump(model, f)
+    
+    return model
+
+def load_model():
+    if os.path.exists(MODEL_PATH):
+        with open(MODEL_PATH, "rb") as f:
+            return pickle.load(f)
+    else:
+        return train_and_save_model()
+
+nlp_model = load_model()
+
+def predict_department(text: str, db):
+    predicted_dept_name = nlp_model.predict([text])[0]
+    
+    department = db.query(Department).filter(Department.name == predicted_dept_name).first()
+    
+    if not department:
+        department = Department(name=predicted_dept_name)
+        db.add(department)
+        db.commit()
+        db.refresh(department)
+        
+    return department.id
+
+================================================================================
+FILE: backend/ai/hotspot_detector.py
+================================================================================
+from sklearn.cluster import DBSCAN
+import numpy as np
+import datetime
+from sqlalchemy.orm import Session
+from ..models import Complaint, Hotspot
+
+def detect_hotspots(db: Session):
+    complaints = db.query(Complaint).filter(Complaint.status != "Resolved").all()
+    
+    if len(complaints) < 3:
+        return
+        
+    coords = np.array([[c.latitude, c.longitude] for c in complaints])
+    
+    dbscan = DBSCAN(eps=0.005, min_samples=3)
+    clusters = dbscan.fit_predict(coords)
+    
+    db.query(Hotspot).delete()
+    
+    unique_labels = set(clusters)
+    for label in unique_labels:
+        if label == -1:
+            continue
+            
+        cluster_mask = (clusters == label)
+        cluster_coords = coords[cluster_mask]
+        
+        center_lat = np.mean(cluster_coords[:, 0])
+        center_lng = np.mean(cluster_coords[:, 1])
+        count = len(cluster_coords)
+        
+        severity = "High" if count >= 5 else "Medium"
+        
+        new_hotspot = Hotspot(
+            center_latitude=center_lat,
+            center_longitude=center_lng,
+            complaint_count=count,
+            severity=severity
+        )
+        db.add(new_hotspot)
+        
+    db.commit()
+
+================================================================================
+FILE: backend/routes/auth.py
+================================================================================
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
+import bcrypt
+import jwt
+import datetime
+
+from ..database import get_db
+from ..models import User
+
+router = APIRouter()
+
+SECRET_KEY = "super_secret_key_for_college_project"
+ALGORITHM = "HS256"
+
+class UserCreate(BaseModel):
+    first_name: str = ""
+    last_name: str = ""
+    contact_number: str = ""
+    occupation: str = ""
+    email: str
+    password: str
+    name: str = None
+    role: str = "CITIZEN"
+    department_id: int = None
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+def get_password_hash(password):
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+def verify_password(plain_password, hashed_password):
+    return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.datetime.utcnow() + datetime.timedelta(hours=24)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+@router.post("/register")
+def register(user: UserCreate, db: Session = Depends(get_db)):
+    db_user = db.query(User).filter(User.email == user.email).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    hashed_password = get_password_hash(user.password)
+    full_name = f"{user.first_name} {user.last_name}".strip() or user.name or user.email
+    new_user = User(
+        name=full_name, 
+        first_name=user.first_name,
+        last_name=user.last_name,
+        contact_number=user.contact_number,
+        occupation=user.occupation,
+        email=user.email, 
+        password_hash=hashed_password, 
+        role=user.role, 
+        department_id=user.department_id
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    access_token = create_access_token(data={
+        "sub": new_user.email,
+        "role": new_user.role,
+        "id": new_user.id,
+        "dept_id": new_user.department_id
+    })
+
+    return {
+        "message": "User created successfully",
+        "access_token": access_token,
+        "token_type": "bearer",
+        "role": new_user.role
+    }
+
+@router.post("/login")
+def login(user: UserLogin, db: Session = Depends(get_db)):
+    db_user = db.query(User).filter(User.email == user.email).first()
+    if not db_user or not verify_password(user.password, db_user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    access_token = create_access_token(data={"sub": db_user.email, "role": db_user.role, "id": db_user.id, "dept_id": db_user.department_id})
+    return {"access_token": access_token, "token_type": "bearer", "role": db_user.role}
+
+================================================================================
+FILE: backend/routes/complaints.py
+================================================================================
+from fastapi import APIRouter, Depends, HTTPException, Header
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
+import jwt
+from ..database import get_db
+from ..models import Complaint, User
+from .auth import SECRET_KEY, ALGORITHM
+from ..ai.nlp_classifier import predict_department
+
+router = APIRouter()
+
+class ComplaintCreate(BaseModel):
+    description: str
+    address: str = None
+    latitude: float
+    longitude: float
+    image_url: str = None
+
+class ComplaintUpdate(BaseModel):
+    status: str
+
+def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid token")
+    
+    token = authorization.split(" ")[1]
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email = payload.get("sub")
+        user = db.query(User).filter(User.email == email).first()
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        return user
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+@router.post("/")
+def create_complaint(complaint: ComplaintCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    predicted_dept_id = predict_department(complaint.description, db)
+    
+    new_complaint = Complaint(
+        citizen_id=current_user.id,
+        description=complaint.description,
+        address=complaint.address,
+        latitude=complaint.latitude,
+        longitude=complaint.longitude,
+        image_url=complaint.image_url,
+        department_id=predicted_dept_id
+    )
+    db.add(new_complaint)
+    db.commit()
+    db.refresh(new_complaint)
+    
+    from ..ai.hotspot_detector import detect_hotspots
+    detect_hotspots(db)
+    
+    return {"message": "Complaint created", "complaint": new_complaint}
+
+@router.get("/")
+def get_complaints(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if current_user.role == "CITIZEN":
+        complaints = db.query(Complaint).filter(Complaint.citizen_id == current_user.id).all()
+    elif current_user.role in ["OFFICER", "HEAD", "ADMIN"]:
+        complaints = db.query(Complaint).all()
+    else:
+        complaints = []
+        
+    result = []
+    for c in complaints:
+        citizen_info = None
+        if c.citizen:
+            citizen_info = {
+                "name": c.citizen.name or f"{c.citizen.first_name or ''} {c.citizen.last_name or ''}".strip() or "Citizen",
+                "email": c.citizen.email,
+                "contact_number": c.citizen.contact_number,
+                "occupation": c.citizen.occupation
+            }
+        result.append({
+            "id": c.id,
+            "citizen_id": c.citizen_id,
+            "citizen": citizen_info,
+            "description": c.description,
+            "address": c.address,
+            "image_url": c.image_url,
+            "latitude": c.latitude,
+            "longitude": c.longitude,
+            "status": c.status,
+            "created_at": c.created_at.isoformat() if c.created_at else None
+        })
+    return result
+
+@router.delete("/{complaint_id}")
+def delete_complaint(complaint_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if current_user.role not in ["HEAD", "ADMIN"]:
+        raise HTTPException(status_code=403, detail="Not authorized to delete complaints")
+    
+    complaint = db.query(Complaint).filter(Complaint.id == complaint_id).first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+        
+    db.delete(complaint)
+    db.commit()
+    return {"message": "Complaint deleted successfully"}
+
+@router.put("/{complaint_id}/status")
+def update_status(complaint_id: int, update: ComplaintUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if current_user.role not in ["OFFICER", "HEAD", "ADMIN"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    complaint = db.query(Complaint).filter(Complaint.id == complaint_id).first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+        
+    complaint.status = update.status
+    db.commit()
+    return {"message": "Status updated successfully"}
+
+================================================================================
+FILE: backend/routes/dashboard.py
+================================================================================
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from ..database import get_db
+from ..models import Complaint, Hotspot, User
+from .complaints import get_current_user
+
+router = APIRouter()
+
+@router.get("/stats")
+def get_admin_stats(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if current_user.role not in ["HEAD", "ADMIN"]:
+        raise HTTPException(status_code=403, detail="Not authorized to view admin stats")
+    
+    total_complaints = db.query(Complaint).count()
+    resolved_complaints = db.query(Complaint).filter(Complaint.status == "Resolved").count()
+    hotspots = db.query(Hotspot).all()
+    
+    total_users = db.query(User).count()
+    total_managers = db.query(User).filter(User.role == "OFFICER").count()
+    
+    return {
+        "total_complaints": total_complaints,
+        "resolved_complaints": resolved_complaints,
+        "total_users": total_users,
+        "total_managers": total_managers,
+        "hotspots": [
+            {
+                "id": h.id,
+                "center_latitude": h.center_latitude,
+                "center_longitude": h.center_longitude,
+                "complaint_count": h.complaint_count,
+                "severity": h.severity,
+                "created_at": h.created_at.isoformat() if h.created_at else None
+            }
+            for h in hotspots
+        ]
+    }
+
+@router.get("/users")
+def get_all_users(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if current_user.role not in ["HEAD", "ADMIN"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    users = db.query(User).all()
+    return [
+        {
+            "id": u.id,
+            "name": u.name or f"{u.first_name or ''} {u.last_name or ''}".strip() or u.email,
+            "first_name": u.first_name,
+            "last_name": u.last_name,
+            "contact_number": u.contact_number,
+            "occupation": u.occupation,
+            "email": u.email,
+            "role": u.role,
+            "department_id": u.department_id
+        }
+        for u in users
+    ]
+
+from pydantic import BaseModel
+class RoleUpdate(BaseModel):
+    role: str
+
+@router.put("/users/{user_id}/role")
+def update_user_role(user_id: int, update_data: RoleUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if current_user.role not in ["HEAD", "ADMIN"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    user.role = update_data.role
+    db.commit()
+    return {"message": "Role updated successfully"}
+
+@router.delete("/users/{user_id}")
+def delete_user(user_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if current_user.role not in ["HEAD", "ADMIN"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    db.delete(user)
+    db.commit()
+    return {"message": "User deleted"}
+
+================================================================================
+FILE: seed.py
+================================================================================
+from backend.database import SessionLocal, engine, Base
+from backend.models import User, Department, Complaint
+from backend.routes.auth import get_password_hash
+
+Base.metadata.create_all(bind=engine)
+
+db = SessionLocal()
+
+# Clear existing test data
+db.query(Complaint).delete()
+db.query(User).delete()
+db.query(Department).delete()
+db.commit()
+
+# Create Users
+admin = User(name="System Admin", email="admin@city.com", password_hash=get_password_hash("AdminCivic2026!"), role="ADMIN", occupation="Chief Municipal Administrator")
+citizen = User(name="Alice Citizen", first_name="Alice", last_name="Citizen", contact_number="+91 98765 43210", email="alice@test.com", password_hash=get_password_hash("AliceCivic2026!"), role="CITIZEN", occupation="Resident")
+manager = User(name="City Manager", email="manager@city.com", password_hash=get_password_hash("ManagerCivic2026!"), role="OFFICER", occupation="Zonal Operations Head")
+
+db.add(admin)
+db.add(citizen)
+db.add(manager)
+db.commit()
+
+print("✅ Database successfully seeded with simplified roles!")
+print("\n--- Test Accounts ---")
+print("Client (Citizen): alice@test.com / AliceCivic2026!")
+print("Manager (Officer): manager@city.com / ManagerCivic2026!")
+print("Admin: admin@city.com / AdminCivic2026!")
+
+================================================================================
+FILE: frontend/package.json
+================================================================================
+{
+  "name": "civicmind-ai",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "axios": "^1.6.8",
+    "leaflet": "^1.9.4",
+    "lucide-react": "^0.363.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-leaflet": "^4.2.1",
+    "react-router-dom": "^6.22.3"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.1",
+    "vite": "^5.2.0"
+  }
+}
+
+================================================================================
+FILE: frontend/vite.config.js
+================================================================================
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+})
+
+================================================================================
+FILE: frontend/tailwind.config.js
+================================================================================
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+}
+
+================================================================================
+FILE: frontend/postcss.config.js
+================================================================================
+export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+}
+
+================================================================================
+FILE: frontend/index.html
+================================================================================
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CivicMind AI</title>
+  </head>
+  <body class="bg-gray-50 text-gray-900 font-sans">
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
+
+================================================================================
+FILE: frontend/src/main.jsx
+================================================================================
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.jsx'
+import './index.css'
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)
+
+================================================================================
+FILE: frontend/src/index.css
+================================================================================
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+    margin: 0;
+    font-family: Arial, Helvetica, sans-serif;
+}
+
+================================================================================
+FILE: frontend/src/api.js
+================================================================================
+import axios from 'axios';
+
+const api = axios.create({
+  baseURL: 'http://localhost:8000/api',
+});
+
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+export default api;
+
+================================================================================
+FILE: frontend/src/ToastContext.jsx
+================================================================================
+import React, { createContext, useContext, useState, useCallback } from 'react';
+
+const ToastContext = createContext();
+
+export function ToastProvider({ children }) {
+  const [toasts, setToasts] = useState([]);
+
+  const addToast = useCallback((message, type = 'success') => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 3000);
+  }, []);
+
+  return (
+    <ToastContext.Provider value={addToast}>
+      {children}
+      <div className="fixed bottom-4 right-4 z-50 flex flex-col space-y-2">
+        {toasts.map(t => (
+          <div 
+            key={t.id} 
+            className={`px-4 py-3 rounded shadow-lg text-white text-sm font-bold animate-fade-in ${t.type === 'error' ? 'bg-red-600' : 'bg-green-600'}`}
+          >
+            {t.message}
+          </div>
+        ))}
+      </div>
+    </ToastContext.Provider>
+  );
+}
+
+export function useToast() {
+  return useContext(ToastContext);
+}
+
+================================================================================
+FILE: frontend/src/App.jsx
+================================================================================
+import React, { useState } from 'react';
+import { BrowserRouter as Router, Routes, Route, Link, useNavigate } from 'react-router-dom';
+import { Eye, EyeOff, Loader2 } from 'lucide-react';
+import CitizenDashboard from './pages/CitizenDashboard';
+import OfficerDashboard from './pages/OfficerDashboard';
+import AdminDashboard from './pages/AdminDashboard';
+import api from './api';
+import { ToastProvider, useToast } from './ToastContext';
+
+function Auth() {
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [contactNumber, setContactNumber] = useState('');
+  const [occupation, setOccupation] = useState('Resident');
+  const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const toast = useToast();
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    try {
+      const response = await api.post('/auth/login', { email, password });
+      localStorage.setItem('token', response.data.access_token);
+      localStorage.setItem('role', response.data.role);
+      
+      toast("Login successful! Redirecting...");
+      setTimeout(() => {
+        if (response.data.role === 'CITIZEN') window.location.href = '/citizen';
+        else if (response.data.role === 'OFFICER') window.location.href = '/officer';
+        else window.location.href = '/admin';
+      }, 500);
+    } catch (err) {
+      toast("Login failed! Please check credentials.", "error");
+      setIsLoading(false);
+    }
+  };
+
+  const handleSignUp = async (e) => {
+    e.preventDefault();
+    if (password.length < 6) {
+      toast("Password must be at least 6 characters.", "error");
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const response = await api.post('/auth/register', {
+        first_name: firstName,
+        last_name: lastName,
+        contact_number: contactNumber,
+        occupation: occupation,
+        email: email,
+        password: password
+      });
+
+      if (response.data.access_token) {
+        localStorage.setItem('token', response.data.access_token);
+        localStorage.setItem('role', response.data.role);
+        toast(`Welcome to CivicMind AI, ${firstName || 'Citizen'}!`);
+        setTimeout(() => {
+          window.location.href = '/citizen';
+        }, 600);
+      } else {
+        toast("Account created! Please sign in.");
+        setIsSignUp(false);
+        setIsLoading(false);
+      }
+    } catch (err) {
+      const msg = err.response?.data?.detail || "Registration failed. Please try again.";
+      toast(msg, "error");
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center my-6">
+      <div className="text-center mb-6">
+        <h1 className="text-4xl md:text-5xl font-extrabold text-blue-900 mb-2 tracking-tight">CIVICMIND AI</h1>
+        <p className="text-lg text-gray-600 italic font-medium">"Predict • Prioritize • Prevent"</p>
+      </div>
+
+      <div className={`w-full ${isSignUp ? 'max-w-lg' : 'max-w-sm'} bg-white p-8 border border-gray-200 rounded-2xl shadow-sm transition-all`}>
+        <div className="flex border-b border-gray-200 mb-6">
+          <button
+            type="button"
+            onClick={() => setIsSignUp(false)}
+            className={`flex-1 py-2 text-center font-bold text-sm border-b-2 transition ${!isSignUp ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+          >
+            Sign In
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsSignUp(true)}
+            className={`flex-1 py-2 text-center font-bold text-sm border-b-2 transition ${isSignUp ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+          >
+            Create Account
+          </button>
+        </div>
+
+        {!isSignUp ? (
+          <form onSubmit={handleLogin} autoComplete="off">
+            <div className="mb-4">
+              <label className="block text-gray-700 text-sm font-bold mb-2">Email Address</label>
+              <input 
+                type="email" 
+                value={email} 
+                onChange={e => setEmail(e.target.value)} 
+                required 
+                autoComplete="off" 
+                placeholder="you@example.com"
+                className="w-full border border-gray-300 p-2.5 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
+              />
+            </div>
+            <div className="mb-6 relative">
+              <label className="block text-gray-700 text-sm font-bold mb-2">Password</label>
+              <div className="relative">
+                <input 
+                  type={showPassword ? "text" : "password"} 
+                  value={password} 
+                  onChange={e => setPassword(e.target.value)} 
+                  required 
+                  autoComplete="new-password" 
+                  placeholder="••••••••"
+                  className="w-full border border-gray-300 p-2.5 pr-10 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
+                />
+                <button 
+                  type="button" 
+                  onClick={() => setShowPassword(!showPassword)} 
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-500 hover:text-gray-700 focus:outline-none"
+                >
+                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                </button>
+              </div>
+            </div>
+            
+            <div className="flex flex-col space-y-3">
+              <button 
+                type="submit" 
+                disabled={isLoading}
+                className="w-full bg-blue-600 text-white font-bold py-2.5 px-4 rounded-lg hover:bg-blue-700 transition shadow-sm disabled:bg-blue-400 flex justify-center items-center"
+              >
+                {isLoading ? <Loader2 className="animate-spin mr-2" size={20} /> : null}
+                {isLoading ? "Signing in..." : "Sign In"}
+              </button>
+              <div className="relative flex py-2 items-center">
+                <div className="flex-grow border-t border-gray-200"></div>
+                <span className="flex-shrink-0 mx-4 text-gray-400 text-xs uppercase">New to CivicMind?</span>
+                <div className="flex-grow border-t border-gray-200"></div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setIsSignUp(true)}
+                className="w-full bg-gray-50 border border-gray-300 text-gray-700 font-bold py-2.5 px-4 rounded-lg hover:bg-gray-100 transition shadow-sm"
+              >
+                Create an Account
+              </button>
+            </div>
+          </form>
+        ) : (
+          <form onSubmit={handleSignUp} autoComplete="off">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-gray-700 text-xs font-bold uppercase mb-1">First Name *</label>
+                <input 
+                  type="text" 
+                  value={firstName} 
+                  onChange={e => setFirstName(e.target.value)} 
+                  required 
+                  placeholder="e.g. John"
+                  className="w-full border border-gray-300 p-2 rounded-lg text-sm focus:outline-none focus:border-blue-500" 
+                />
+              </div>
+              <div>
+                <label className="block text-gray-700 text-xs font-bold uppercase mb-1">Last Name *</label>
+                <input 
+                  type="text" 
+                  value={lastName} 
+                  onChange={e => setLastName(e.target.value)} 
+                  required 
+                  placeholder="e.g. Doe"
+                  className="w-full border border-gray-300 p-2 rounded-lg text-sm focus:outline-none focus:border-blue-500" 
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-gray-700 text-xs font-bold uppercase mb-1">Contact Number *</label>
+                <input 
+                  type="tel" 
+                  value={contactNumber} 
+                  onChange={e => setContactNumber(e.target.value)} 
+                  required 
+                  placeholder="+91 98765 43210"
+                  className="w-full border border-gray-300 p-2 rounded-lg text-sm focus:outline-none focus:border-blue-500" 
+                />
+              </div>
+              <div>
+                <label className="block text-gray-700 text-xs font-bold uppercase mb-1">Occupation *</label>
+                <select 
+                  value={occupation} 
+                  onChange={e => setOccupation(e.target.value)}
+                  className="w-full border border-gray-300 p-2 rounded-lg text-sm bg-white focus:outline-none focus:border-blue-500"
+                >
+                  <option value="Resident">Local Resident</option>
+                  <option value="Student">Student</option>
+                  <option value="IT / Software Professional">IT / Software Professional</option>
+                  <option value="Business Owner / Merchant">Business Owner / Merchant</option>
+                  <option value="Healthcare Worker">Healthcare Worker</option>
+                  <option value="Educator / Teacher">Educator / Teacher</option>
+                  <option value="Civil Engineer">Civil Engineer</option>
+                  <option value="Government Employee">Government Employee</option>
+                  <option value="Social Worker">Social Worker</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-gray-700 text-xs font-bold uppercase mb-1">Email Address *</label>
+              <input 
+                type="email" 
+                value={email} 
+                onChange={e => setEmail(e.target.value)} 
+                required 
+                placeholder="john.doe@example.com"
+                className="w-full border border-gray-300 p-2 rounded-lg text-sm focus:outline-none focus:border-blue-500" 
+              />
+            </div>
+
+            <div className="mb-6 relative">
+              <label className="block text-gray-700 text-xs font-bold uppercase mb-1">Password *</label>
+              <div className="relative">
+                <input 
+                  type={showPassword ? "text" : "password"} 
+                  value={password} 
+                  onChange={e => setPassword(e.target.value)} 
+                  required 
+                  autoComplete="new-password" 
+                  placeholder="Min 6 characters"
+                  className="w-full border border-gray-300 p-2 pr-10 rounded-lg text-sm focus:outline-none focus:border-blue-500" 
+                />
+                <button 
+                  type="button" 
+                  onClick={() => setShowPassword(!showPassword)} 
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-500 hover:text-gray-700 focus:outline-none"
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+              <p className="text-gray-400 text-xs mt-1">Make sure it has at least 6 characters.</p>
+            </div>
+
+            <div className="flex flex-col space-y-3">
+              <button 
+                type="submit" 
+                disabled={isLoading}
+                className="w-full bg-blue-600 text-white font-bold py-2.5 px-4 rounded-lg hover:bg-blue-700 transition shadow-sm disabled:bg-blue-400 flex justify-center items-center"
+              >
+                {isLoading ? <Loader2 className="animate-spin mr-2" size={20} /> : null}
+                {isLoading ? "Creating Account..." : "Complete Registration"}
+              </button>
+              <div className="text-center text-xs text-gray-500 pt-2">
+                Already registered?{' '}
+                <button 
+                  type="button" 
+                  onClick={() => setIsSignUp(false)}
+                  className="text-blue-600 hover:underline font-bold"
+                >
+                  Sign In instead
+                </button>
+              </div>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const isAuthenticated = !!localStorage.getItem('token');
+
+  const logout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('role');
+    window.location.href = '/';
+  };
+
+  return (
+    <ToastProvider>
+      <Router>
+        <div className="min-h-screen flex flex-col bg-gray-50">
+          <header className="bg-blue-800 text-white shadow-md">
+            <div className="max-w-6xl mx-auto px-4 py-3 flex justify-between items-center">
+              <Link to="/" className="hover:text-blue-200 transition">
+                <h1 className="text-xl font-bold">CivicMind AI</h1>
+              </Link>
+              <nav className="space-x-6 flex items-center">
+                {isAuthenticated && <button onClick={logout} className="hover:text-blue-200 transition">Logout</button>}
+              </nav>
+            </div>
+          </header>
+          <main className="flex-grow w-full max-w-6xl mx-auto p-4 mt-6">
+            <Routes>
+              <Route path="/" element={<Auth />} />
+              <Route path="/citizen" element={<CitizenDashboard />} />
+              <Route path="/officer" element={<OfficerDashboard />} />
+              <Route path="/admin" element={<AdminDashboard />} />
+            </Routes>
+          </main>
+        </div>
+      </Router>
+    </ToastProvider>
+  );
+}
+
+export default App;
+
+================================================================================
+FILE: frontend/src/pages/CitizenDashboard.jsx
+================================================================================
+import React, { useState, useEffect, useRef } from 'react';
+import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet';
+import { Loader2 } from 'lucide-react';
+import 'leaflet/dist/leaflet.css';
+import api from '../api';
+import { useToast } from '../ToastContext';
+
+import L from 'leaflet';
+import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
+import markerIcon from 'leaflet/dist/images/marker-icon.png';
+import markerShadow from 'leaflet/dist/images/marker-shadow.png';
+
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconUrl: markerIcon,
+  iconRetinaUrl: markerIcon2x,
+  shadowUrl: markerShadow,
+});
+
+function LocationPicker({ position, setPosition }) {
+  const map = useMapEvents({
+    click(e) {
+      setPosition(e.latlng);
+    },
+  });
+
+  useEffect(() => {
+    if (position) {
+      map.flyTo(position, 15, { animate: true });
+    }
+  }, [position, map]);
+
+  return position === null ? null : <Marker position={position}></Marker>;
+}
+
+export default function CitizenDashboard() {
+  const [complaints, setComplaints] = useState([]);
+  const [description, setDescription] = useState('');
+  const [position, setPosition] = useState(null);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [photoUrl, setPhotoUrl] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const toast = useToast();
+
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+
+  const [address, setAddress] = useState('');
+
+  useEffect(() => {
+    if (position) {
+      const getAddress = async () => {
+        try {
+          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${position.lat}&lon=${position.lng}`);
+          const data = await res.json();
+          setAddress(data.display_name || "Unknown Location");
+        } catch (error) {
+          setAddress("Could not fetch address");
+        }
+      };
+      getAddress();
+    }
+  }, [position]);
+
+  const [expandedId, setExpandedId] = useState(null);
+
+  const toggleExpand = (id) => {
+    setExpandedId(expandedId === id ? null : id);
+  };
+
+  const defaultCenter = [28.6139, 77.2090]; 
+
+  const fetchComplaints = async () => {
+    try {
+      const res = await api.get('/complaints/');
+      setComplaints(res.data);
+    } catch (e) {
+      toast("Failed to load history", "error");
+    }
+  };
+
+  useEffect(() => { fetchComplaints(); }, []);
+
+  const startCamera = async () => {
+    setIsCameraOpen(true);
+    setPhotoUrl(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      if (videoRef.current) videoRef.current.srcObject = stream;
+    } catch (err) {
+      toast("Camera access denied or no camera found.", "error");
+      setIsCameraOpen(false);
+    }
+  };
+
+  const stopCamera = () => {
+    if (videoRef.current && videoRef.current.srcObject) {
+      videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+    }
+    setIsCameraOpen(false);
+  };
+
+  const takePhoto = () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (video && canvas) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+      setPhotoUrl(canvas.toDataURL('image/png'));
+      stopCamera();
+    }
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => setPhotoUrl(event.target.result);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleDetectLocation = (e) => {
+    e.preventDefault();
+    if (navigator.geolocation) {
+      toast("Requesting location access...");
+      navigator.geolocation.getCurrentPosition(
+        (loc) => {
+          setPosition({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+          toast("Location detected!");
+        },
+        () => toast("Could not detect location. Please ensure permissions are enabled.", "error")
+      );
+    } else {
+      toast("Geolocation is not supported by your browser.", "error");
+    }
+  };
+
+  const isFormValid = description.trim().length >= 10 && position !== null;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!isFormValid) return;
+    
+    setIsSubmitting(true);
+    try {
+      await api.post('/complaints/', {
+        description,
+        address: address,
+        latitude: parseFloat(position.lat),
+        longitude: parseFloat(position.lng),
+        image_url: photoUrl
+      });
+      toast('Complaint successfully submitted!');
+      setDescription('');
+      setPosition(null);
+      setPhotoUrl(null);
+      setAddress('');
+      fetchComplaints();
+    } catch (e) {
+      toast("Error submitting complaint.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="bg-white p-6 border border-gray-200 rounded shadow-sm">
+        <h2 className="text-xl font-bold mb-4 text-gray-800 border-b pb-2">Report an Issue</h2>
+        <form onSubmit={handleSubmit}>
+          <div className="mb-4">
+            <label className="block text-gray-700 text-sm font-bold mb-2">Description</label>
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)} className="w-full border p-2 rounded focus:outline-none focus:border-blue-500" rows="3" placeholder="E.g. Broken water pipe leaking on Main Street..." required></textarea>
+            {description.length > 0 && description.trim().length < 10 && (
+              <p className="text-red-500 text-xs mt-1 font-semibold">Please describe the issue in more detail (at least 10 characters).</p>
+            )}
+          </div>
+          
+          <div className="mb-6 border p-4 rounded bg-gray-50">
+            <label className="block text-gray-700 text-sm font-bold mb-2">Attach Photo Proof (Optional)</label>
+            {!isCameraOpen && !photoUrl && (
+              <div className="flex space-x-4">
+                <button type="button" onClick={startCamera} className="bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700 transition font-semibold">📷 Take Photo</button>
+                <label className="bg-gray-600 text-white px-4 py-2 rounded text-sm hover:bg-gray-700 transition cursor-pointer font-semibold">
+                  📁 Upload File
+                  <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
+                </label>
+              </div>
+            )}
+            
+            {isCameraOpen && (
+              <div className="mt-2 flex flex-col items-center">
+                <video ref={videoRef} autoPlay className="w-full max-h-48 bg-black rounded" />
+                <div className="flex space-x-2 mt-2">
+                  <button type="button" onClick={takePhoto} className="bg-blue-600 text-white px-4 py-2 rounded font-bold hover:bg-blue-700">Snap!</button>
+                  <button type="button" onClick={stopCamera} className="bg-red-600 text-white px-4 py-2 rounded font-bold hover:bg-red-700">Cancel</button>
+                </div>
+              </div>
+            )}
+            <canvas ref={canvasRef} className="hidden" />
+
+            {photoUrl && !isCameraOpen && (
+              <div className="mt-2 relative inline-block">
+                <img src={photoUrl} alt="Complaint" className="max-h-48 rounded border shadow-sm" />
+                <button type="button" onClick={() => setPhotoUrl(null)} className="absolute top-1 right-1 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded">Remove</button>
+              </div>
+            )}
+          </div>
+          
+          <div className="mb-6">
+            <div className="flex justify-between items-center mb-2">
+              <label className="block text-gray-700 text-sm font-bold">Pinpoint Location on Map *</label>
+              <button type="button" onClick={handleDetectLocation} className="bg-blue-100 border border-blue-300 text-blue-800 hover:bg-blue-200 px-3 py-1 rounded text-sm font-bold transition">📍 Detect My Location</button>
+            </div>
+            <div className={`h-64 w-full rounded border overflow-hidden ${!position ? 'border-red-300' : 'border-green-400 border-2'}`}>
+              <MapContainer center={defaultCenter} zoom={5} style={{ height: '100%', width: '100%' }}>
+                <TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                <LocationPicker position={position} setPosition={setPosition} />
+              </MapContainer>
+            </div>
+            {!position && <p className="text-red-500 text-xs mt-1 font-semibold">You must click the map or detect your location to submit.</p>}
+            
+            {address && (
+              <p className="text-sm text-gray-700 mt-2 bg-gray-100 p-2 rounded border">
+                <strong>Address:</strong> {address}
+              </p>
+            )}
+          </div>
+          
+          <button 
+            type="submit" 
+            disabled={!isFormValid || isSubmitting}
+            className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded hover:bg-blue-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed flex justify-center items-center"
+          >
+            {isSubmitting ? <Loader2 className="animate-spin mr-2" size={20} /> : null}
+            {isSubmitting ? "Analyzing & Submitting..." : "Submit Complaint"}
+          </button>
+        </form>
+      </div>
+
+      <div className="bg-white p-6 border border-gray-200 rounded shadow-sm">
+        <h2 className="text-xl font-bold mb-4 text-gray-800 border-b pb-2">My History</h2>
+        <p className="text-gray-500 text-sm mb-4">Click "View Details" to see the full report of your submitted issues.</p>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-left text-sm">
+            <thead className="uppercase border-b-2 bg-gray-50 text-gray-600">
+              <tr>
+                <th className="px-4 py-3 font-semibold">ID</th>
+                <th className="px-4 py-3 font-semibold">Issue Snippet</th>
+                <th className="px-4 py-3 font-semibold">Status</th>
+                <th className="px-4 py-3 font-semibold text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {complaints.map((c) => (
+                <React.Fragment key={c.id}>
+                  <tr className={`border-b hover:bg-gray-50 transition-colors ${expandedId === c.id ? 'bg-blue-50' : ''}`}>
+                    <td className="px-4 py-4 font-bold text-gray-800">#{c.id}</td>
+                    <td className="px-4 py-4 text-gray-800 truncate max-w-xs">{c.description}</td>
+                    <td className="px-4 py-4">
+                      <span className={`px-2 py-1 rounded text-xs font-bold ${
+                        c.status === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
+                        c.status === 'Resolved' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
+                      }`}>
+                        {c.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-right">
+                      <button 
+                        onClick={() => toggleExpand(c.id)} 
+                        type="button"
+                        className="text-blue-600 hover:text-blue-800 font-semibold text-sm underline"
+                      >
+                        {expandedId === c.id ? 'Hide Details' : 'View Details'}
+                      </button>
+                    </td>
+                  </tr>
+
+                  {expandedId === c.id && (
+                    <tr className="border-b bg-gray-50">
+                      <td colSpan="4" className="px-6 py-6">
+                        <div className="bg-white border rounded shadow-sm p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <div className="space-y-4">
+                            <div>
+                              <h4 className="text-xs uppercase font-bold text-gray-400 tracking-wider">Date Submitted</h4>
+                              <p className="text-gray-800 font-medium">
+                                {new Date(c.created_at + 'Z').toLocaleString('en-IN', {
+                                  day: '2-digit', month: '2-digit', year: 'numeric',
+                                  hour: '2-digit', minute: '2-digit',
+                                  hour12: false
+                                })}
+                              </p>
+                            </div>
+                            
+                            <div>
+                              <h4 className="text-xs uppercase font-bold text-gray-400 tracking-wider">Full Description</h4>
+                              <p className="text-gray-800 bg-gray-50 p-3 border rounded mt-1">{c.description}</p>
+                            </div>
+
+                            <div>
+                              <h4 className="text-xs uppercase font-bold text-gray-400 tracking-wider">Location Address</h4>
+                              <p className="text-gray-800 font-medium mt-1">{c.address || 'Address not available'}</p>
+                            </div>
+                            
+                            <div>
+                              <h4 className="text-xs uppercase font-bold text-gray-400 tracking-wider">Current Status</h4>
+                              <p className="text-gray-800 font-bold mt-1">{c.status}</p>
+                            </div>
+                          </div>
+
+                          <div>
+                            <h4 className="text-xs uppercase font-bold text-gray-400 tracking-wider mb-2">Uploaded Photo</h4>
+                            {c.image_url ? (
+                              <div className="border border-gray-200 shadow-sm rounded overflow-hidden">
+                                <img src={c.image_url} alt="Proof" className="w-full h-auto object-contain bg-gray-100 max-h-64" />
+                              </div>
+                            ) : (
+                              <div className="h-48 bg-gray-100 border-2 border-dashed border-gray-300 rounded flex items-center justify-center text-gray-500 font-medium italic">
+                                No photo was attached
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+================================================================================
+FILE: frontend/src/pages/OfficerDashboard.jsx
+================================================================================
+import React, { useState, useEffect } from 'react';
+import api from '../api';
+
+export default function OfficerDashboard() {
+  const [complaints, setComplaints] = useState([]);
+
+  const fetchComplaints = async () => {
+    try {
+      const res = await api.get('/complaints/');
+      setComplaints(res.data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  useEffect(() => { fetchComplaints(); }, []);
+
+  const updateStatus = async (id, status) => {
+    try {
+      await api.put(`/complaints/${id}/status`, { status });
+      fetchComplaints();
+    } catch (e) {
+      alert("Error updating status");
+    }
+  };
+
+  const [expandedId, setExpandedId] = useState(null);
+
+  const toggleExpand = (id) => {
+    setExpandedId(expandedId === id ? null : id);
+  };
+
+  return (
+    <div className="max-w-6xl mx-auto bg-white p-6 border border-gray-200 rounded shadow-sm">
+      <div className="flex justify-between items-center mb-6 border-b pb-4">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800">Manager Dashboard</h2>
+          <p className="text-gray-500 text-sm mt-1">Click "View Details" to see full reports, citizen contact, and photos.</p>
+        </div>
+        <div className="text-sm bg-blue-100 text-blue-800 px-3 py-1 rounded font-semibold flex items-center">
+          <span className="w-2 h-2 rounded-full bg-blue-600 mr-2"></span>
+          {complaints.filter(c => c.status === 'Pending').length} Pending Issues
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-left text-sm">
+          <thead className="uppercase tracking-wider border-b-2 border-gray-200 bg-gray-50 text-gray-600">
+            <tr>
+              <th className="px-6 py-4 font-semibold">ID</th>
+              <th className="px-6 py-4 font-semibold">Issue Snippet</th>
+              <th className="px-6 py-4 font-semibold">Status</th>
+              <th className="px-6 py-4 font-semibold text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {complaints.map((c) => (
+              <React.Fragment key={c.id}>
+                <tr className={`border-b hover:bg-gray-50 transition-colors ${expandedId === c.id ? 'bg-blue-50' : ''}`}>
+                  <td className="px-6 py-4 font-bold text-gray-800">#{c.id}</td>
+                  <td className="px-6 py-4 text-gray-800 truncate max-w-xs">{c.description}</td>
+                  <td className="px-6 py-4">
+                    <span className={`px-2 py-1 rounded text-xs font-bold ${
+                      c.status === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
+                      c.status === 'Resolved' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
+                    }`}>
+                      {c.status}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <button 
+                      onClick={() => toggleExpand(c.id)} 
+                      className="text-blue-600 hover:text-blue-800 font-semibold text-sm underline"
+                    >
+                      {expandedId === c.id ? 'Hide Details' : 'View Details'}
+                    </button>
+                  </td>
+                </tr>
+
+                {expandedId === c.id && (
+                  <tr className="border-b bg-gray-50">
+                    <td colSpan="4" className="px-8 py-6">
+                      <div className="bg-white border rounded shadow-sm p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div className="space-y-4">
+                          <div>
+                            <h4 className="text-xs uppercase font-bold text-gray-400 tracking-wider">Date & Time</h4>
+                            <p className="text-gray-800 font-medium">
+                              {new Date(c.created_at + 'Z').toLocaleString('en-IN', {
+                                day: '2-digit', month: '2-digit', year: 'numeric',
+                                hour: '2-digit', minute: '2-digit',
+                                hour12: false
+                              })}
+                            </p>
+                          </div>
+
+                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3.5 shadow-sm">
+                            <h4 className="text-xs uppercase font-bold text-blue-800 tracking-wider mb-2">Citizen Contact Details</h4>
+                            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                              <div>
+                                <p className="text-gray-900 font-bold text-sm">
+                                  {c.citizen?.name || `Citizen #${c.citizen_id}`}
+                                </p>
+                                <p className="text-gray-600 text-xs">
+                                  Occupation: <span className="font-semibold text-gray-800">{c.citizen?.occupation || 'Resident'}</span>
+                                </p>
+                              </div>
+                              <div className="flex flex-col sm:items-end gap-1">
+                                {c.citizen?.contact_number ? (
+                                  <a 
+                                    href={`tel:${c.citizen.contact_number}`} 
+                                    className="inline-flex items-center text-xs font-bold text-green-800 bg-green-100 hover:bg-green-200 px-2.5 py-1 rounded transition w-fit"
+                                  >
+                                    📞 Call: {c.citizen.contact_number}
+                                  </a>
+                                ) : (
+                                  <span className="text-xs text-gray-400 italic">No phone registered</span>
+                                )}
+                                {c.citizen?.email && (
+                                  <a 
+                                    href={`mailto:${c.citizen.email}`} 
+                                    className="text-xs text-blue-600 hover:underline inline-flex items-center font-medium"
+                                  >
+                                    ✉️ {c.citizen.email}
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <div>
+                            <h4 className="text-xs uppercase font-bold text-gray-400 tracking-wider">Full Complaint Description</h4>
+                            <p className="text-gray-800 bg-gray-50 p-3 border rounded mt-1">{c.description}</p>
+                          </div>
+
+                          <div>
+                            <h4 className="text-xs uppercase font-bold text-gray-400 tracking-wider">Location Address</h4>
+                            <p className="text-gray-800 font-medium mt-1">{c.address || 'Address not available'}</p>
+                            <a 
+                              href={`https://www.google.com/maps/dir/?api=1&destination=${c.latitude},${c.longitude}`} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center mt-2 bg-blue-100 text-blue-700 px-3 py-1 rounded text-xs font-bold hover:bg-blue-200 transition"
+                            >
+                              🗺️ Open in Google Maps
+                            </a>
+                          </div>
+
+                          <div className="pt-4 border-t">
+                            <h4 className="text-xs uppercase font-bold text-gray-400 tracking-wider mb-2">Update Status</h4>
+                            <select 
+                              className="border border-gray-300 rounded p-2 text-sm bg-white font-semibold focus:outline-none focus:border-blue-500"
+                              value={c.status}
+                              onChange={(e) => updateStatus(c.id, e.target.value)}
+                            >
+                              <option value="Pending">Pending</option>
+                              <option value="In Progress">In Progress</option>
+                              <option value="Resolved">Resolved</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div>
+                          <h4 className="text-xs uppercase font-bold text-gray-400 tracking-wider mb-2">Attached Proof</h4>
+                          {c.image_url ? (
+                            <div className="border-4 border-white shadow-md rounded overflow-hidden">
+                              <img src={c.image_url} alt="Proof of complaint" className="w-full h-auto object-contain bg-gray-100" />
+                            </div>
+                          ) : (
+                            <div className="h-48 bg-gray-100 border-2 border-dashed border-gray-300 rounded flex items-center justify-center text-gray-500 font-medium italic">
+                              No photo was attached
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+================================================================================
+FILE: frontend/src/pages/AdminDashboard.jsx
+================================================================================
+import React, { useState, useEffect } from 'react';
+import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import api from '../api';
+
+export default function AdminDashboard() {
+  const [activeTab, setActiveTab] = useState('overview');
+  const [stats, setStats] = useState({ total_complaints: 0, resolved_complaints: 0, total_users: 0, total_managers: 0, hotspots: [] });
+  const [users, setUsers] = useState([]);
+  const [complaints, setComplaints] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [authError, setAuthError] = useState(null);
+
+  const currentRole = localStorage.getItem('role');
+
+  const fetchData = async () => {
+    setIsLoading(true);
+    setAuthError(null);
+
+    if (currentRole !== 'ADMIN' && currentRole !== 'HEAD') {
+      setAuthError("You are not logged in as an Administrator. Please log in with admin@city.com to access this dashboard.");
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      try {
+        const statsRes = await api.get('/dashboard/stats');
+        setStats(statsRes.data || { total_complaints: 0, resolved_complaints: 0, total_users: 0, total_managers: 0, hotspots: [] });
+      } catch (err) {
+        console.warn("Could not fetch stats:", err);
+      }
+
+      try {
+        const usersRes = await api.get('/dashboard/users');
+        setUsers(usersRes.data || []);
+      } catch (err) {
+        console.warn("Could not fetch users:", err);
+      }
+
+      try {
+        const compRes = await api.get('/complaints/');
+        setComplaints(compRes.data || []);
+      } catch (err) {
+        console.warn("Could not fetch complaints:", err);
+      }
+    } catch (e) {
+      console.error("Failed to load admin data", e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchData(); }, []);
+
+  const deleteUser = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this user?")) return;
+    try {
+      await api.delete(`/dashboard/users/${id}`);
+      fetchData();
+    } catch (e) { alert("Error deleting user"); }
+  };
+
+  const changeUserRole = async (id, newRole) => {
+    try {
+      await api.put(`/dashboard/users/${id}/role`, { role: newRole });
+      fetchData();
+    } catch (e) { alert("Error updating role"); }
+  };
+
+  const deleteComplaint = async (id) => {
+    if (!window.confirm("Are you sure you want to permanently delete this complaint?")) return;
+    try {
+      await api.delete(`/complaints/${id}`);
+      fetchData();
+    } catch (e) { alert("Error deleting complaint"); }
+  };
+
+  const updateComplaintStatus = async (id, newStatus) => {
+    try {
+      await api.put(`/complaints/${id}/status`, { status: newStatus });
+      fetchData();
+    } catch (e) { alert("Error updating status"); }
+  };
+
+  if (authError) {
+    return (
+      <div className="max-w-xl mx-auto mt-12 bg-white border border-red-200 rounded-xl p-8 shadow-sm text-center">
+        <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold">
+          ⚠️
+        </div>
+        <h2 className="text-2xl font-bold text-gray-800 mb-2">Administrator Access Required</h2>
+        <p className="text-gray-600 text-sm mb-6">{authError}</p>
+        <div className="bg-gray-50 border rounded-lg p-3 text-xs text-gray-700 font-mono mb-6 text-left">
+          <strong>Default Admin Credentials:</strong><br/>
+          Email: admin@city.com<br/>
+          Password: AdminCivic2026!
+        </div>
+        <button 
+          onClick={() => {
+            localStorage.removeItem('token');
+            localStorage.removeItem('role');
+            window.location.href = '/';
+          }}
+          className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg transition"
+        >
+          Sign In as Admin
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-7xl mx-auto flex flex-col md:flex-row gap-6">
+      <div className="w-full md:w-64 bg-white border border-gray-200 rounded shadow-sm p-4 h-fit sticky top-6">
+        <div className="flex justify-between items-center mb-6 border-b pb-2">
+          <h2 className="text-xl font-extrabold text-blue-900">Admin Control</h2>
+          <button onClick={fetchData} title="Refresh Data" className="text-xs text-blue-600 hover:text-blue-800 font-bold bg-blue-50 px-2 py-1 rounded">🔄</button>
+        </div>
+        <nav className="flex flex-col space-y-2">
+          <button onClick={() => setActiveTab('overview')} className={`text-left px-4 py-3 rounded font-bold transition ${activeTab === 'overview' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+            📊 System Overview
+          </button>
+          <button onClick={() => setActiveTab('users')} className={`text-left px-4 py-3 rounded font-bold transition ${activeTab === 'users' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+            👥 Manage Users
+          </button>
+          <button onClick={() => setActiveTab('complaints')} className={`text-left px-4 py-3 rounded font-bold transition ${activeTab === 'complaints' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+            🚨 Master Database
+          </button>
+        </nav>
+      </div>
+
+      <div className="flex-1 space-y-6">
+        {activeTab === 'overview' && (
+          <div className="animate-fade-in">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              <div className="bg-white p-4 border rounded shadow-sm text-center">
+                <h3 className="text-gray-500 text-xs font-bold uppercase">Total Users</h3>
+                <p className="text-3xl font-extrabold text-gray-800 mt-1">{stats.total_users || 0}</p>
+              </div>
+              <div className="bg-white p-4 border rounded shadow-sm text-center">
+                <h3 className="text-gray-500 text-xs font-bold uppercase">Managers</h3>
+                <p className="text-3xl font-extrabold text-blue-600 mt-1">{stats.total_managers || 0}</p>
+              </div>
+              <div className="bg-white p-4 border rounded shadow-sm text-center">
+                <h3 className="text-gray-500 text-xs font-bold uppercase">All Complaints</h3>
+                <p className="text-3xl font-extrabold text-gray-800 mt-1">{stats.total_complaints || 0}</p>
+              </div>
+              <div className="bg-white p-4 border rounded shadow-sm text-center border-b-4 border-b-red-500">
+                <h3 className="text-gray-500 text-xs font-bold uppercase">Active Hotspots</h3>
+                <p className="text-3xl font-extrabold text-red-600 mt-1">{stats.hotspots?.length || 0}</p>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 border rounded shadow-sm mb-6">
+              <h2 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2">AI Hotspot Heatmap</h2>
+              <p className="text-xs text-gray-500 mb-4">Live geographical view of recurring complaint clusters detected by DBSCAN.</p>
+              <div className="h-96 w-full rounded border overflow-hidden relative z-0">
+                <MapContainer center={[20.5937, 78.9629]} zoom={4} style={{ height: '100%', width: '100%' }}>
+                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap" />
+                  {(stats.hotspots || []).map((h, idx) => (
+                    <CircleMarker 
+                      key={idx} 
+                      center={[h.center_latitude, h.center_longitude]} 
+                      radius={h.severity === 'High' ? 25 : h.severity === 'Medium' ? 15 : 10}
+                      fillOpacity={0.5}
+                      pathOptions={{ color: h.severity === 'High' ? 'red' : h.severity === 'Medium' ? 'orange' : 'yellow' }}
+                    >
+                      <Popup>
+                        <strong>{h.severity} Severity Hotspot</strong><br/>
+                        Complaints in cluster: {h.complaint_count}
+                      </Popup>
+                    </CircleMarker>
+                  ))}
+                </MapContainer>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'users' && (
+          <div className="animate-fade-in space-y-6">
+            <div className="bg-white p-6 border rounded shadow-sm">
+              <h2 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2 flex justify-between">
+                <span>City Managers & Admins</span>
+                <span className="text-sm bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                  {users.filter(u => u.role === 'OFFICER' || u.role === 'ADMIN').length} Total
+                </span>
+              </h2>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="uppercase border-b-2 bg-gray-50 text-gray-600">
+                    <tr>
+                      <th className="px-4 py-3">ID</th>
+                      <th className="px-4 py-3">Name</th>
+                      <th className="px-4 py-3">Email</th>
+                      <th className="px-4 py-3">Role</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.filter(u => u.role === 'OFFICER' || u.role === 'ADMIN').map(u => (
+                      <tr key={u.id} className="border-b hover:bg-gray-50">
+                        <td className="px-4 py-3 font-bold">#{u.id}</td>
+                        <td className="px-4 py-3">
+                          <div className="text-gray-800 font-medium">{u.name}</div>
+                          <div className="text-xs text-gray-500">{u.occupation || 'Staff'}</div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="text-gray-600">{u.email}</div>
+                          <div className="text-xs text-gray-400">{u.contact_number || 'N/A'}</div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <select 
+                            className={`border rounded p-1 text-xs font-bold ${u.role === 'ADMIN' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}
+                            value={u.role}
+                            onChange={(e) => changeUserRole(u.id, e.target.value)}
+                            disabled={u.role === 'ADMIN'}
+                          >
+                            <option value="CITIZEN">Citizen</option>
+                            <option value="OFFICER">Manager</option>
+                            <option value="ADMIN">Admin</option>
+                          </select>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {u.role !== 'ADMIN' && (
+                            <button onClick={() => deleteUser(u.id)} className="text-red-600 hover:text-red-800 font-bold text-xs uppercase bg-red-50 hover:bg-red-100 px-2 py-1 rounded">Delete</button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 border rounded shadow-sm">
+              <h2 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2 flex justify-between">
+                <span>Citizens</span>
+                <span className="text-sm bg-gray-100 text-gray-800 px-2 py-1 rounded">
+                  {users.filter(u => u.role === 'CITIZEN').length} Total
+                </span>
+              </h2>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="uppercase border-b-2 bg-gray-50 text-gray-600">
+                    <tr>
+                      <th className="px-4 py-3">ID</th>
+                      <th className="px-4 py-3">Name</th>
+                      <th className="px-4 py-3">Email</th>
+                      <th className="px-4 py-3">Role</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.filter(u => u.role === 'CITIZEN').map(u => (
+                      <tr key={u.id} className="border-b hover:bg-gray-50">
+                        <td className="px-4 py-3 font-bold">#{u.id}</td>
+                        <td className="px-4 py-3">
+                          <div className="text-gray-800 font-medium">{u.name}</div>
+                          <div className="text-xs text-gray-500">{u.occupation || 'Citizen'}</div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="text-gray-600">{u.email}</div>
+                          <div className="text-xs text-gray-400">{u.contact_number || 'N/A'}</div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <select 
+                            className="border rounded p-1 text-xs font-bold bg-gray-100 text-gray-800"
+                            value={u.role}
+                            onChange={(e) => changeUserRole(u.id, e.target.value)}
+                          >
+                            <option value="CITIZEN">Citizen</option>
+                            <option value="OFFICER">Manager</option>
+                          </select>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <button onClick={() => deleteUser(u.id)} className="text-red-600 hover:text-red-800 font-bold text-xs uppercase bg-red-50 hover:bg-red-100 px-2 py-1 rounded">Delete</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'complaints' && (
+          <div className="bg-white p-6 border rounded shadow-sm animate-fade-in">
+            <h2 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2 flex justify-between items-center">
+              <span>Master Database (All Complaints)</span>
+              <span className="text-sm bg-gray-100 px-3 py-1 rounded">Total: {complaints.length}</span>
+            </h2>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead className="uppercase border-b-2 bg-gray-50 text-gray-600">
+                  <tr>
+                    <th className="px-4 py-3">ID</th>
+                    <th className="px-4 py-3">Snippet</th>
+                    <th className="px-4 py-3">Reporter</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3 text-right">Danger Zone</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {complaints.slice(0, 10).map(c => (
+                    <tr key={c.id} className="border-b hover:bg-gray-50">
+                      <td className="px-4 py-3 font-bold">#{c.id}</td>
+                      <td className="px-4 py-3 text-gray-800 truncate max-w-[180px]">{c.description}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-semibold text-gray-800">{c.citizen?.name || `User #${c.citizen_id}`}</div>
+                        {c.citizen?.contact_number && (
+                          <div className="text-xs text-green-700 font-mono">📞 {c.citizen.contact_number}</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <select 
+                          className="border border-gray-300 rounded p-1 text-xs bg-white font-semibold"
+                          value={c.status}
+                          onChange={(e) => updateComplaintStatus(c.id, e.target.value)}
+                        >
+                          <option value="Pending">Pending</option>
+                          <option value="In Progress">In Progress</option>
+                          <option value="Resolved">Resolved</option>
+                        </select>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button onClick={() => deleteComplaint(c.id)} className="text-white bg-red-600 hover:bg-red-700 font-bold text-xs px-3 py-1 rounded shadow-sm">Delete</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            
+            {complaints.length > 10 && (
+              <div className="mt-4 flex justify-between items-center bg-gray-50 p-3 rounded border">
+                <span className="text-sm text-gray-600 font-semibold">Showing top 10 recent records (Pagination enabled)</span>
+                <div className="space-x-2">
+                  <button disabled className="px-3 py-1 border rounded bg-gray-200 text-gray-400 cursor-not-allowed text-sm font-bold">Prev</button>
+                  <button disabled className="px-3 py-1 border rounded bg-gray-200 text-gray-400 cursor-not-allowed text-sm font-bold">Next</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+================================================================================
+SETUP & RUN COMMANDS (Execute in terminal)
+================================================================================
+# 1. Setup Backend Python virtual environment and install dependencies:
+python3 -m venv backend/venv
+source backend/venv/bin/activate
+pip install -r requirements.txt
+
+# 2. Seed initial test accounts:
+python3 seed.py
+
+# 3. Setup Frontend dependencies:
+cd frontend
+npm install --legacy-peer-deps
+cd ..
+
+# 4. Start the servers:
+# Terminal 1 (Backend):
+source backend/venv/bin/activate
+uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+
+# Terminal 2 (Frontend):
+cd frontend
+npm run dev
