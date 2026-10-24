@@ -1,3 +1,4 @@
+HEAD
 # CivicMind AI
 
 > **"Predict • Prioritize • Prevent"**
@@ -74,3 +75,6 @@ chmod +x setup.sh start_backend.sh start_frontend.sh
 | **Admin** | `admin@city.com` | `AdminCivic2026!` |
 | **Manager** | `manager@city.com` | `ManagerCivic2026!` |
 | **Citizen** | `alice@test.com` | `AliceCivic2026!` |
+=======
+# civicmindai
+
