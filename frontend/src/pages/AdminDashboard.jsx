@@ -1,7 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import api from '../api';
+
+function MapController({ center }) {
+  const map = useMap();
+  useEffect(() => {
+    map.invalidateSize();
+    map.setView(center, 5);
+  }, [map, center]);
+  return null;
+}
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState('overview');
@@ -158,12 +167,28 @@ export default function AdminDashboard() {
             </div>
 
             <div className="bg-white p-6 border rounded shadow-sm mb-6">
-              <h2 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2">AI Hotspot Heatmap</h2>
-              <p className="text-xs text-gray-500 mb-4">Live geographical view of recurring complaint clusters detected by DBSCAN.</p>
+              <div className="flex justify-between items-center mb-2 flex-wrap gap-2 border-b pb-2">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-800">AI Hotspot Heatmap (India)</h2>
+                  <p className="text-xs text-gray-500">Live geographical view of recurring complaint clusters detected by DBSCAN.</p>
+                </div>
+                <div>
+                  {(stats.hotspots || []).length === 0 ? (
+                    <span className="text-xs text-green-700 bg-green-50 border border-green-200 px-3 py-1 rounded-full font-semibold">
+                      ✅ All hotspots resolved / No active clusters
+                    </span>
+                  ) : (
+                    <span className="text-xs text-red-700 bg-red-50 border border-red-200 px-3 py-1 rounded-full font-semibold">
+                      🚨 {stats.hotspots.length} Active Hotspot{stats.hotspots.length > 1 ? 's' : ''} Detected
+                    </span>
+                  )}
+                </div>
+              </div>
               <div className="h-96 w-full rounded border overflow-hidden relative z-0">
-                <MapContainer center={[20.5937, 78.9629]} zoom={4} style={{ height: '100%', width: '100%' }}>
+                <MapContainer center={[20.5937, 78.9629]} zoom={5} minZoom={4} style={{ height: '100%', width: '100%' }}>
                   <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap" />
-                  {stats.hotspots.map((h, idx) => (
+                  <MapController center={[20.5937, 78.9629]} />
+                  {(stats.hotspots || []).map((h, idx) => (
                     <CircleMarker 
                       key={idx} 
                       center={[h.center_latitude, h.center_longitude]} 

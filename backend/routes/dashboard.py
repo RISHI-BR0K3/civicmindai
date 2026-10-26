@@ -11,6 +11,10 @@ def get_admin_stats(db: Session = Depends(get_db), current_user: User = Depends(
     if current_user.role not in ["HEAD", "ADMIN"]:
         raise HTTPException(status_code=403, detail="Not authorized to view admin stats")
     
+    # Recalculate hotspots dynamically to ensure resolved complaints are immediately purged
+    from ..ai.hotspot_detector import detect_hotspots
+    detect_hotspots(db)
+    
     total_complaints = db.query(Complaint).count()
     resolved_complaints = db.query(Complaint).filter(Complaint.status == "Resolved").count()
     hotspots = db.query(Hotspot).all()

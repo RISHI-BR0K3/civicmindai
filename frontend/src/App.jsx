@@ -288,8 +288,7 @@ function App() {
   const isAuthenticated = !!localStorage.getItem('token');
 
   const logout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('role');
+    localStorage.clear();
     window.location.href = '/';
   };
 
@@ -302,8 +301,20 @@ function App() {
               <Link to="/" className="hover:text-blue-200 transition">
                 <h1 className="text-xl font-bold">CivicMind AI</h1>
               </Link>
-              <nav className="space-x-6 flex items-center">
-                {isAuthenticated && <button onClick={logout} className="hover:text-blue-200 transition">Logout</button>}
+              <nav className="space-x-4 flex items-center">
+                {isAuthenticated && (
+                  <>
+                    <span className="text-xs bg-blue-900 border border-blue-700 px-3 py-1 rounded-full text-blue-200 font-semibold">
+                      Logged in: {localStorage.getItem('role') || 'Citizen'}
+                    </span>
+                    <button 
+                      onClick={logout} 
+                      className="hover:text-blue-200 transition font-bold text-sm bg-blue-700 hover:bg-blue-600 px-3 py-1 rounded"
+                    >
+                      Logout
+                    </button>
+                  </>
+                )}
               </nav>
             </div>
           </header>

@@ -21,16 +21,25 @@ class ComplaintCreate(BaseModel):
 class ComplaintUpdate(BaseModel):
     status: str
 
-def get_current_user(authorization: str = Header(...), db: Session = Depends(get_db)):
+def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid token")
     try:
         token = authorization.split(" ")[1]
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user = db.query(User).filter(User.id == payload.get("id")).first()
+        
+        user = None
+        user_id = payload.get("id")
+        if user_id is not None:
+            user = db.query(User).filter(User.id == user_id).first()
+        if not user and payload.get("sub"):
+            user = db.query(User).filter(User.email == payload.get("sub")).first()
+            
         if user is None:
             raise HTTPException(status_code=401, detail="User not found")
         return user
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 @router.post("/")
 def create_complaint(complaint: ComplaintCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -56,15 +65,45 @@ def create_complaint(complaint: ComplaintCreate, db: Session = Depends(get_db), 
     
     return {"message": "Complaint created", "complaint": new_complaint}
 
+@router.get("/my")
+def get_my_complaints(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Strictly returns ONLY the complaints submitted by the logged-in user."""
+    complaints = db.query(Complaint).filter(Complaint.citizen_id == current_user.id).order_by(Complaint.created_at.desc()).all()
+    
+    result = []
+    for c in complaints:
+        citizen_info = {
+            "name": current_user.name or f"{current_user.first_name or ''} {current_user.last_name or ''}".strip() or "Citizen",
+            "email": current_user.email,
+            "contact_number": current_user.contact_number,
+            "occupation": current_user.occupation
+        }
+        result.append({
+            "id": c.id,
+            "citizen_id": c.citizen_id,
+            "citizen": citizen_info,
+            "description": c.description,
+            "address": c.address,
+            "image_url": c.image_url,
+            "latitude": c.latitude,
+            "longitude": c.longitude,
+            "status": c.status,
+            "created_at": c.created_at.isoformat() if c.created_at else None
+        })
+    return result
+
 @router.get("/")
-def get_complaints(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    if current_user.role == "CITIZEN":
-        complaints = db.query(Complaint).filter(Complaint.citizen_id == current_user.id).all()
-    elif current_user.role in ["OFFICER", "HEAD", "ADMIN"]:
+def get_complaints(mine: bool = False, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    user_role = (current_user.role or "").upper()
+    
+    # If explicitly requested 'mine', or if role is CITIZEN, strictly return only their complaints
+    if mine or user_role == "CITIZEN":
+        complaints = db.query(Complaint).filter(Complaint.citizen_id == current_user.id).order_by(Complaint.created_at.desc()).all()
+    elif user_role in ["OFFICER", "HEAD", "ADMIN"]:
         # Manager and Admin see ALL complaints
-        complaints = db.query(Complaint).all()
+        complaints = db.query(Complaint).order_by(Complaint.created_at.desc()).all()
     else:
-        complaints = []
+        complaints = db.query(Complaint).filter(Complaint.citizen_id == current_user.id).order_by(Complaint.created_at.desc()).all()
         
     result = []
     for c in complaints:
@@ -101,6 +140,10 @@ def delete_complaint(complaint_id: int, db: Session = Depends(get_db), current_u
         
     db.delete(complaint)
     db.commit()
+    
+    from ..ai.hotspot_detector import detect_hotspots
+    detect_hotspots(db)
+    
     return {"message": "Complaint deleted successfully"}
 
 @router.put("/{complaint_id}/status")
@@ -114,4 +157,8 @@ def update_status(complaint_id: int, update: ComplaintUpdate, db: Session = Depe
         
     complaint.status = update.status
     db.commit()
+    
+    from ..ai.hotspot_detector import detect_hotspots
+    detect_hotspots(db)
+    
     return {"message": "Status updated successfully"}

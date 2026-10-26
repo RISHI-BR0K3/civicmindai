@@ -1,0 +1,459 @@
+<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+<head>
+<meta charset='utf-8'>
+<title>CivicMind AI — Technical Project Documentation</title>
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+<w:View>Print</w:View>
+<w:Zoom>100</w:Zoom>
+<w:DoNotOptimizeForBrowser/>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+  @page {
+    size: A4;
+    margin: 1.0in 1.0in 1.0in 1.0in;
+    mso-header-margin: 0.5in;
+    mso-footer-margin: 0.5in;
+  }
+  body {
+    font-family: 'Calibri', 'Segoe UI', Arial, sans-serif;
+    font-size: 11pt;
+    line-height: 1.5;
+    color: #1a202c;
+  }
+  h1 {
+    font-size: 24pt;
+    color: #1e3a8a;
+    font-weight: bold;
+    margin-top: 0;
+    margin-bottom: 6pt;
+    border-bottom: 2pt solid #1e3a8a;
+    padding-bottom: 6pt;
+  }
+  h2 {
+    font-size: 16pt;
+    color: #1e40af;
+    font-weight: bold;
+    margin-top: 18pt;
+    margin-bottom: 8pt;
+    border-bottom: 1pt solid #cbd5e1;
+    padding-bottom: 4pt;
+    page-break-after: avoid;
+  }
+  h3 {
+    font-size: 13pt;
+    color: #0f172a;
+    font-weight: bold;
+    margin-top: 14pt;
+    margin-bottom: 4pt;
+    page-break-after: avoid;
+  }
+  p {
+    margin-top: 0;
+    margin-bottom: 8pt;
+    text-align: justify;
+  }
+  .subtitle {
+    font-size: 13pt;
+    color: #4b5563;
+    font-style: italic;
+    margin-bottom: 16pt;
+  }
+  .badge {
+    background-color: #eff6ff;
+    border: 1pt solid #bfdbfe;
+    color: #1e40af;
+    padding: 3pt 8pt;
+    font-weight: bold;
+    font-size: 9pt;
+    border-radius: 4pt;
+    display: inline-block;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10pt;
+    margin-bottom: 14pt;
+    font-size: 10pt;
+  }
+  th {
+    background-color: #1e3a8a;
+    color: #ffffff;
+    font-weight: bold;
+    padding: 8pt;
+    border: 1pt solid #cbd5e1;
+    text-align: left;
+  }
+  td {
+    padding: 7pt 8pt;
+    border: 1pt solid #cbd5e1;
+    vertical-align: top;
+  }
+  tr:nth-child(even) {
+    background-color: #f8fafc;
+  }
+  pre {
+    background-color: #f1f5f9;
+    border: 1pt solid #e2e8f0;
+    padding: 10pt;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 9.5pt;
+    border-radius: 4pt;
+    white-space: pre-wrap;
+    margin-top: 8pt;
+    margin-bottom: 12pt;
+  }
+  ul, ol {
+    margin-top: 0;
+    margin-bottom: 8pt;
+    padding-left: 20pt;
+  }
+  li {
+    margin-bottom: 4pt;
+  }
+  .callout {
+    background-color: #f0fdf4;
+    border-left: 4pt solid #16a34a;
+    padding: 10pt 12pt;
+    margin: 12pt 0;
+  }
+  .header-box {
+    background-color: #f8fafc;
+    border: 1pt solid #e2e8f0;
+    padding: 14pt;
+    border-radius: 6pt;
+    margin-bottom: 20pt;
+  }
+</style>
+</head>
+<body>
+
+<div class="header-box">
+  <h1>CIVICMIND AI</h1>
+  <div class="subtitle">"Predict • Prioritize • Prevent" — Technical Architecture, Implementation, and Prototype Report</div>
+  <p><strong>System Name:</strong> CivicMind AI — Full-Stack Municipal Grievance Redressal & Spatial Intelligence Platform<br>
+  <strong>Target Application:</strong> Municipal Grievance Tracking, AI Triage, and Spatial Hotspot Detection<br>
+  <strong>Stack:</strong> React 18 (Vite), Python 3.12 (FastAPI), Scikit-Learn (TF-IDF & DBSCAN), SQLite (SQLAlchemy 2.0)</p>
+</div>
+
+<h2>1. Technical Architecture and Design</h2>
+
+<h3>1.1 Architecture Overview</h3>
+<p>CivicMind AI is implemented as a decoupled, asynchronous <strong>Full-Stack Web Application</strong>. The frontend is a client-side Single Page Application (SPA) communicating over RESTful HTTP APIs with an asynchronous FastAPI backend engine, underpinned by local SQLite relational storage and an embedded Machine Learning inference subsystem.</p>
+
+<pre>
++-----------------------------------------------------------------------------------+
+|                           FRONTEND CLIENT (Port 5173)                             |
+|         React 18 SPA (Vite + Tailwind CSS + React-Leaflet + Lucide Icons)         |
+|  ┌─────────────────────┐  ┌─────────────────────┐  ┌───────────────────────────┐  |
+|  |  Citizen Dashboard  |  |  Manager Dashboard  |  |   Admin Master Dashboard  |  |
+|  └─────────────────────┘  └─────────────────────┘  └───────────────────────────┘  |
++-----------------------------------------------------------------------------------+
+                                         │  ▲
+                     HTTP / REST API via Axios  │  JWT Bearer Token
+                                         ▼  │
++-----------------------------------------------------------------------------------+
+|                            BACKEND API (Port 8000)                                |
+|                       FastAPI Asynchronous Web Engine                             |
+|  ┌─────────────────────┐  ┌─────────────────────┐  ┌───────────────────────────┐  |
+|  |   /api/auth/        |  |  /api/complaints/   |  |      /api/dashboard/      |  |
+|  └─────────────────────┘  └─────────────────────┘  └───────────────────────────┘  |
++-----------------------------------------------------------------------------------+
+                  │                                                 │
+                  ▼                                                 ▼
++------------------------------------+            +---------------------------------+
+|       EMBEDDED AI / ML PIPELINE    |            |       PERSISTENCE LAYER         |
+|  - NLP Classifier (TF-IDF + Bayes) |            |  SQLite Database (civic_app.db) |
+|  - Hotspot Clustering (DBSCAN)     |            |  SQLAlchemy 2.0 ORM             |
++------------------------------------+            +---------------------------------+
+</pre>
+
+<h3>1.2 Implemented Database Schema (backend/models.py)</h3>
+<p>The system stores all state in a localized SQLite database (<code>civic_app.db</code>) managed by SQLAlchemy ORM with four primary entities:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Table Name</th>
+      <th>Primary Columns</th>
+      <th>Relationships & Key Constraints</th>
+      <th>Functional Role</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>users</strong></td>
+      <td><code>id, name, first_name, last_name, contact_number, occupation, email, password_hash, role, department_id</code></td>
+      <td>Primary Key: <code>id</code><br>Unique: <code>email</code><br>Foreign Key: <code>department_id</code></td>
+      <td>Stores citizen credentials, full profile details, and role privileges (CITIZEN, OFFICER, ADMIN).</td>
+    </tr>
+    <tr>
+      <td><strong>departments</strong></td>
+      <td><code>id, name</code></td>
+      <td>Primary Key: <code>id</code><br>Unique: <code>name</code></td>
+      <td>Municipal departments (Roads, Electricity, Water & Sanitation, Waste Management).</td>
+    </tr>
+    <tr>
+      <td><strong>complaints</strong></td>
+      <td><code>id, citizen_id, description, address, image_url, latitude, longitude, department_id, status, created_at</code></td>
+      <td>Foreign Keys:<br>• <code>citizen_id → users.id</code><br>• <code>department_id → departments.id</code></td>
+      <td>Contains issue text, reverse geocoded address, Base64 photo proof, GPS coordinates, and status.</td>
+    </tr>
+    <tr>
+      <td><strong>hotspots</strong></td>
+      <td><code>id, center_latitude, center_longitude, complaint_count, severity, created_at</code></td>
+      <td>Primary Key: <code>id</code></td>
+      <td>Maintains active DBSCAN spatial clusters calculated from unresolved complaints.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>1.3 Authentication & Role-Based Access Control (RBAC)</h3>
+<ul>
+  <li><strong>Password Security:</strong> Passwords are encrypted before database insertion using <code>bcrypt</code> with salting via Python's <code>passlib</code>.</li>
+  <li><strong>Cryptographic Tokens:</strong> User sessions issue signed <code>JSON Web Tokens (JWT)</code> using the <code>HS256</code> algorithm and a 24-hour expiration payload containing user ID, email, and role.</li>
+  <li><strong>Axios Interceptor:</strong> The frontend HTTP client (<code>frontend/src/api.js</code>) dynamically attaches the Bearer token to the <code>Authorization</code> header for authenticated requests.</li>
+  <li><strong>Access Boundaries:</strong>
+    <ul>
+      <li><strong>Citizen:</strong> Restricted strictly to reporting issues and fetching their own personal submissions (<code>/api/complaints/my</code>).</li>
+      <li><strong>Officer (Manager):</strong> Authorized to access the city-wide complaint list, view citizen contact cards, update resolution statuses, and launch Google Maps routing.</li>
+      <li><strong>Admin:</strong> Authorized to access the Master Database, modify user roles, delete complaints, and inspect the DBSCAN AI Heatmap.</li>
+    </ul>
+  </li>
+</ul>
+
+<h2>2. Implementation and Prototype Development</h2>
+
+<h3>2.1 Frontend User Interface & Dashboards</h3>
+
+<h4>A. Authentication Portal (frontend/src/App.jsx)</h4>
+<ul>
+  <li><strong>Dual-Tab Layout:</strong> Integrated toggle between <strong>Sign In</strong> and <strong>Create Account</strong>.</li>
+  <li><strong>Citizen Profiling:</strong> Captures First Name, Last Name, Contact Number, Email, Password, and Occupation (Local Resident, Student, IT Professional, Healthcare Worker, Government Employee, Civil Engineer, etc.).</li>
+  <li><strong>Instant Session Initiation:</strong> Automatically signs in and redirects the citizen to their dashboard upon successful registration without requiring a second login.</li>
+  <li><strong>Interactive Controls:</strong> Password visibility toggle using Lucide React icons (<code>Eye</code>, <code>EyeOff</code>) and minimum 6-character client validation.</li>
+</ul>
+
+<h4>B. Citizen Dashboard (frontend/src/pages/CitizenDashboard.jsx)</h4>
+<ul>
+  <li><strong>Interactive GIS Map:</strong> Powered by <code>react-leaflet</code>, centered on the geographic center of India (<code>[20.5937, 78.9629]</code>) at zoom level 5.</li>
+  <li><strong>HTML5 Geolocation:</strong> <code>📍 Detect My Location</code> triggers browser GPS coordinates and animates the map to street level.</li>
+  <li><strong>Reverse Geocoding:</strong> Automatically queries the OpenStreetMap Nominatim API to translate latitude/longitude into a real street address.</li>
+  <li><strong>Center India Shortcut:</strong> Provides an <code>🇮🇳 Center India</code> button that immediately resets the map view to the country overview.</li>
+  <li><strong>In-Browser WebRTC Camera:</strong> Streams the user's camera via <code>navigator.mediaDevices.getUserMedia</code>, renders to an HTML5 Canvas, and extracts a Base64 image directly inside the browser.</li>
+  <li><strong>Form Validation:</strong> The submission button is disabled with gray styling until at least 10 description characters and a map location are selected.</li>
+  <li><strong>Isolated "My History" View:</strong> Queries <code>/api/complaints/my</code> to ensure citizens exclusively see complaints submitted from their account. Expandable accordion rows display full descriptions, addresses, timestamps, status badges, and attached photos.</li>
+</ul>
+
+<h4>C. Manager Dashboard (frontend/src/pages/OfficerDashboard.jsx)</h4>
+<ul>
+  <li><strong>City Queue:</strong> Displays all complaints submitted across the city in an expandable table.</li>
+  <li><strong>Citizen Contact Card:</strong> Expanding an issue reveals the reporter's full name, occupation, a one-click <code>📞 Call</code> dialer button (<code>tel:</code>), and an email launcher (<code>mailto:</code>).</li>
+  <li><strong>Google Maps Navigation:</strong> Provides dynamic links (<code>https://www.google.com/maps/dir/?api=1&destination={lat},{lng}</code>) allowing field staff to launch turn-by-turn navigation directly to the incident.</li>
+  <li><strong>Live Resolution Workflow:</strong> Dropdown enables status updating from <code>Pending</code> to <code>In Progress</code> or <code>Resolved</code>.</li>
+</ul>
+
+<h4>D. Admin Master Control Panel (frontend/src/pages/AdminDashboard.jsx)</h4>
+<ul>
+  <li><strong>System Metrics:</strong> Counters tracking Total Users, Managers, Total Complaints, and Active Hotspots.</li>
+  <li><strong>AI Hotspot Heatmap:</strong> Leaflet map plotting active DBSCAN clusters as interactive <code>CircleMarker</code> elements (Red = High severity, Yellow/Orange = Medium severity) with issue count popups.</li>
+  <li><strong>Categorized User Management:</strong> Separates City Managers from general Citizens. Admins can promote/demote user roles or delete accounts.</li>
+  <li><strong>Master Database & Pagination:</strong> Displays all records with override and purge controls, paginated to 10 rows per page to safeguard browser rendering.</li>
+</ul>
+
+<h3>2.2 Implemented AI & Machine Learning Subsystems</h3>
+
+<h4>A. Natural Language Processing Department Classifier (backend/ai/nlp_classifier.py)</h4>
+<ul>
+  <li><strong>Algorithm:</strong> <code>TfidfVectorizer</code> (term frequency-inverse document frequency) combined with a <code>MultinomialNB</code> (Multinomial Naive Bayes) pipeline.</li>
+  <li><strong>Automated Routing:</strong> Automatically classifies complaint text into municipal departments:
+    <ul>
+      <li><strong>Roads:</strong> potholes, cracked asphalt, road hazards.</li>
+      <li><strong>Electricity:</strong> broken street lights, blackouts, damaged power lines.</li>
+      <li><strong>Water & Sanitation:</strong> water pipe burst, drainage overflowing, sewage.</li>
+      <li><strong>Waste Management:</strong> uncollected garbage, overflowing dumpsters.</li>
+    </ul>
+  </li>
+  <li><strong>Persistence:</strong> Automatically trains and saves the model to <code>nlp_model.pkl</code> on first launch if not already cached.</li>
+</ul>
+
+<h4>B. Spatial Density Clustering for Hotspot Detection (backend/ai/hotspot_detector.py)</h4>
+<ul>
+  <li><strong>Algorithm:</strong> Scikit-Learn <code>DBSCAN</code> with radius $\varepsilon = 0.005$ ($\approx 500\text{ meters}$) and $\text{min\_samples} = 3$.</li>
+  <li><strong>Unresolved Focus:</strong> Clusters strictly complaints where <code>status != 'Resolved'</code>.</li>
+  <li><strong>Centroid Calculation:</strong> Calculates arithmetic mean latitude and longitude of clustered complaints.</li>
+  <li><strong>Severity Assessment:</strong> Categorized as <strong>High</strong> severity if cluster contains $\ge 5$ complaints, otherwise <strong>Medium</strong>.</li>
+  <li><strong>Real-Time Eviction:</strong> Whenever a complaint is marked <code>Resolved</code> by a manager or deleted by an admin, <code>detect_hotspots()</code> recalculates clusters; if unresolved issues in a cluster fall below 3, the hotspot is automatically evicted from the database in real-time.</li>
+</ul>
+
+<h2>3. Tools Integration, Testing, and Performance Validation</h2>
+
+<h3>3.1 Technology Stack Matrix</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Layer</th>
+      <th>Tool / Library</th>
+      <th>Version</th>
+      <th>Specific Implementation in this Project</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Frontend</strong></td>
+      <td>React</td>
+      <td>18.2.0</td>
+      <td>Component architecture, hooks (<code>useState</code>, <code>useEffect</code>, <code>useRef</code>, <code>useContext</code>).</td>
+    </tr>
+    <tr>
+      <td><strong>Build Tool</strong></td>
+      <td>Vite</td>
+      <td>5.2.0</td>
+      <td>ES module bundling, fast hot-reloading development server.</td>
+    </tr>
+    <tr>
+      <td><strong>Styling</strong></td>
+      <td>Tailwind CSS</td>
+      <td>3.4.1</td>
+      <td>Utility-first responsive styles, color-coded badges, and flexible grids.</td>
+    </tr>
+    <tr>
+      <td><strong>Mapping</strong></td>
+      <td>React-Leaflet</td>
+      <td>4.2.1</td>
+      <td>Interactive GIS maps, custom tile layers, click-to-pin marker placement.</td>
+    </tr>
+    <tr>
+      <td><strong>Icons</strong></td>
+      <td>Lucide React</td>
+      <td>0.363.0</td>
+      <td>Visual icons: <code>Eye</code>, <code>EyeOff</code>, <code>Loader2</code>.</td>
+    </tr>
+    <tr>
+      <td><strong>HTTP</strong></td>
+      <td>Axios</td>
+      <td>1.6.8</td>
+      <td>REST calls with automated JWT Bearer Authorization header injection.</td>
+    </tr>
+    <tr>
+      <td><strong>Backend</strong></td>
+      <td>FastAPI & Uvicorn</td>
+      <td>0.110.0 / 0.28.0</td>
+      <td>Asynchronous Python REST API with auto-generated Swagger documentation at <code>/docs</code>.</td>
+    </tr>
+    <tr>
+      <td><strong>Database</strong></td>
+      <td>SQLAlchemy & SQLite</td>
+      <td>2.0.28</td>
+      <td>Relational ORM mapped to local SQLite binary file (<code>civic_app.db</code>).</td>
+    </tr>
+    <tr>
+      <td><strong>Machine Learning</strong></td>
+      <td>Scikit-learn & NumPy</td>
+      <td>1.4.1 / 1.26.4</td>
+      <td>TF-IDF vectorizer, Naive Bayes classifier, and DBSCAN spatial clustering.</td>
+    </tr>
+    <tr>
+      <td><strong>Security</strong></td>
+      <td>Bcrypt & PyJWT</td>
+      <td>4.1.2 / 2.8.0</td>
+      <td>Salted password hashing and cryptographic JSON Web Token signing.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>3.2 Testing Scenarios Conducted</h3>
+<ol>
+  <li><strong>Authentication & Role Routing:</strong>
+    <ul>
+      <li>Verified login with all three pre-seeded accounts: Citizen (<code>alice@test.com</code>), Manager (<code>manager@city.com</code>), and Admin (<code>admin@city.com</code>).</li>
+      <li>Validated that unauthorized roles cannot view the Admin dashboard (displays an Administrator Access Required security screen).</li>
+    </ul>
+  </li>
+  <li><strong>Citizen Data Isolation:</strong>
+    <ul>
+      <li>Logged in as Alice and submitted issues. Registered a second citizen account and verified that the second user's "My History" starts completely blank (<code>0 Filed by you</code>).</li>
+      <li>Confirmed that <code>/api/complaints/my</code> filters strictly by <code>Complaint.citizen_id == current_user.id</code>.</li>
+    </ul>
+  </li>
+  <li><strong>Hotspot Lifecycle & Eviction:</strong>
+    <ul>
+      <li>Submitted 3 complaints within a 300-meter radius. Verified that the Admin Heatmap renders an active hotspot circle.</li>
+      <li>Updated 1 complaint to <code>Resolved</code> via Manager Dashboard. Verified that the active hotspot circle is immediately purged from the database and disappears from the heatmap.</li>
+    </ul>
+  </li>
+  <li><strong>Hardware & Geolocation APIs:</strong>
+    <ul>
+      <li>Verified that the HTML5 WebRTC camera opens, takes snapshot captures, and converts them to valid Base64 image URIs stored in SQLite.</li>
+      <li>Verified that <code>📍 Detect My Location</code> accurately retrieves browser coordinates and reverse geocodes them into human-readable street names.</li>
+    </ul>
+  </li>
+</ol>
+
+<h3>3.3 Performance Validations Implemented</h3>
+<ul>
+  <li><strong>Asynchronous Toast Notifications:</strong> Replaced blocking browser <code>alert()</code> dialogs with a non-blocking Toast system (<code>ToastContext.jsx</code>).</li>
+  <li><strong>Concurrent Submission Guards:</strong> Form buttons disable and show animated <code>Loader2</code> spinning icons while awaiting server responses, preventing duplicate submissions.</li>
+  <li><strong>Safe Startup Auto-Migrations:</strong> Backend startup checks execute safe <code>ALTER TABLE</code> SQL statements for new columns (<code>address</code>, <code>first_name</code>, <code>last_name</code>, <code>contact_number</code>, <code>occupation</code>) so existing SQLite databases never fail on startup.</li>
+  <li><strong>DOM Throttling via Pagination:</strong> The Admin Master Database displays complaints in slices of 10 to ensure steady browser rendering performance.</li>
+</ul>
+
+<h2>4. Industry Readiness and Refinement</h2>
+
+<p>This section details the specific engineering standards and code quality refinements <strong>already present in the current codebase</strong>:</p>
+
+<ul>
+  <li><strong>Modularity & Separation of Concerns:</strong> The codebase is structured into isolated layers: API routers (<code>routes/</code>), Machine Learning logic (<code>ai/</code>), database schema (<code>models.py</code>), and role-specific UI views (<code>pages/</code>).</li>
+  <li><strong>Data Sanitization & Circular Reference Prevention:</strong> The backend cleans model outputs into explicit dictionaries, detaching circular ORM relationships and excluding password hashes before JSON transmission.</li>
+  <li><strong>Dual User Lookup in Authentication:</strong> The <code>get_current_user</code> dependency looks up users by both primary key ID and email claim, ensuring session continuity regardless of token age.</li>
+  <li><strong>Local Windows Scripts:</strong> The repository includes complete startup automation scripts:
+    <ul>
+      <li><code>requirements.txt</code>: Complete Python dependency manifest.</li>
+      <li><code>seed.py</code>: One-step database seeding script.</li>
+      <li><code>start_backend.ps1</code>: Virtual environment activation and FastAPI server launch.</li>
+      <li><code>start_frontend.ps1</code>: Vite frontend launcher.</li>
+    </ul>
+  </li>
+  <li><strong>Repository Cleanliness:</strong> Configured <code>.gitignore</code> strictly excluding temporary directories (<code>node_modules/</code>, <code>backend/venv/</code>, SQLite database binaries, and Python cache).</li>
+</ul>
+
+<h2>5. Project Outcome</h2>
+
+<h3>5.1 Core Deliverables Realized</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Project Motto</th>
+      <th>Implemented Feature</th>
+      <th>Realized Outcome</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>"Predict"</strong></td>
+      <td>DBSCAN Spatial Clustering (<code>hotspot_detector.py</code>)</td>
+      <td>Identifies recurring infrastructure failure clusters ($\ge 3$ unresolved issues within 500m) in real-time, displaying them on a live visual heatmap.</td>
+    </tr>
+    <tr>
+      <td><strong>"Prioritize"</strong></td>
+      <td>NLP Classifier (<code>nlp_classifier.py</code>)</td>
+      <td>Automatically parses complaint descriptions and routes them to the appropriate municipal department with zero manual sorting latency.</td>
+    </tr>
+    <tr>
+      <td><strong>"Prevent"</strong></td>
+      <td>Manager Google Maps Routing, Citizen Contact Cards & Isolated Tracking</td>
+      <td>Provides field officers with direct citizen dialers (<code>tel:</code>), visual photographic proof, and turn-by-turn navigation directly to the site.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>5.2 Verification Summary</h3>
+<p>CivicMind AI is a fully verified, operational Full-Stack project running on localhost (Ports 5173 and 8000). Every component—from React dashboards to FastAPI endpoints, Machine Learning inference, Leaflet GIS mapping, and SQLite storage—is built, connected, and functioning as documented.</p>
+
+</body>
+</html>

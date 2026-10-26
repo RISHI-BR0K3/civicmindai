@@ -18,7 +18,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow,
 });
 
-function LocationPicker({ position, setPosition }) {
+function LocationPicker({ position, setPosition, defaultCenter }) {
   const map = useMapEvents({
     click(e) {
       setPosition(e.latlng);
@@ -26,10 +26,16 @@ function LocationPicker({ position, setPosition }) {
   });
 
   useEffect(() => {
+    map.invalidateSize();
+  }, [map]);
+
+  useEffect(() => {
     if (position) {
       map.flyTo(position, 15, { animate: true });
+    } else {
+      map.setView(defaultCenter, 5);
     }
-  }, [position, map]);
+  }, [position, map, defaultCenter]);
 
   return position === null ? null : <Marker position={position}></Marker>;
 }
@@ -70,11 +76,11 @@ export default function CitizenDashboard() {
     setExpandedId(expandedId === id ? null : id);
   };
 
-  const defaultCenter = [28.6139, 77.2090]; 
+  const defaultCenter = [20.5937, 78.9629]; // Geographic center of India 
 
   const fetchComplaints = async () => {
     try {
-      const res = await api.get('/complaints/');
+      const res = await api.get('/complaints/my');
       setComplaints(res.data);
     } catch (e) {
       toast("Failed to load history", "error");
@@ -214,14 +220,30 @@ export default function CitizenDashboard() {
           </div>
           
           <div className="mb-6">
-            <div className="flex justify-between items-center mb-2">
+            <div className="flex justify-between items-center mb-2 flex-wrap gap-2">
               <label className="block text-gray-700 text-sm font-bold">Pinpoint Location on Map *</label>
-              <button type="button" onClick={handleDetectLocation} className="bg-blue-100 border border-blue-300 text-blue-800 hover:bg-blue-200 px-3 py-1 rounded text-sm font-bold transition">📍 Detect My Location</button>
+              <div className="flex gap-2">
+                <button 
+                  type="button" 
+                  onClick={() => setPosition(null)} 
+                  className="bg-gray-100 border border-gray-300 text-gray-700 hover:bg-gray-200 px-2.5 py-1 rounded text-xs font-bold transition"
+                  title="Reset view to India"
+                >
+                  🇮🇳 Center India
+                </button>
+                <button 
+                  type="button" 
+                  onClick={handleDetectLocation} 
+                  className="bg-blue-100 border border-blue-300 text-blue-800 hover:bg-blue-200 px-2.5 py-1 rounded text-xs font-bold transition"
+                >
+                  📍 Detect My Location
+                </button>
+              </div>
             </div>
             <div className={`h-64 w-full rounded border overflow-hidden ${!position ? 'border-red-300' : 'border-green-400 border-2'}`}>
-              <MapContainer center={defaultCenter} zoom={5} style={{ height: '100%', width: '100%' }}>
+              <MapContainer center={defaultCenter} zoom={5} minZoom={4} style={{ height: '100%', width: '100%' }}>
                 <TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                <LocationPicker position={position} setPosition={setPosition} />
+                <LocationPicker position={position} setPosition={setPosition} defaultCenter={defaultCenter} />
               </MapContainer>
             </div>
             {!position && <p className="text-red-500 text-xs mt-1 font-semibold">You must click the map or detect your location to submit.</p>}
@@ -245,19 +267,31 @@ export default function CitizenDashboard() {
       </div>
 
       <div className="bg-white p-6 border border-gray-200 rounded shadow-sm">
-        <h2 className="text-xl font-bold mb-4 text-gray-800 border-b pb-2">My History</h2>
-        <p className="text-gray-500 text-sm mb-4">Click "View Details" to see the full report of your submitted issues.</p>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
-            <thead className="uppercase border-b-2 bg-gray-50 text-gray-600">
-              <tr>
-                <th className="px-4 py-3 font-semibold">ID</th>
-                <th className="px-4 py-3 font-semibold">Issue Snippet</th>
-                <th className="px-4 py-3 font-semibold">Status</th>
-                <th className="px-4 py-3 font-semibold text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody>
+        <div className="flex justify-between items-center mb-4 border-b pb-2">
+          <h2 className="text-xl font-bold text-gray-800">My History</h2>
+          <span className="text-xs bg-blue-100 text-blue-800 font-bold px-2.5 py-1 rounded-full">
+            {complaints.length} Filed by you
+          </span>
+        </div>
+        <p className="text-gray-500 text-sm mb-4">Review issues reported from your account. Click "View Details" to see the full report.</p>
+        
+        {complaints.length === 0 ? (
+          <div className="text-center py-12 border-2 border-dashed rounded-lg bg-gray-50">
+            <p className="text-gray-500 font-medium">You haven't filed any complaints yet.</p>
+            <p className="text-gray-400 text-xs mt-1">Use the form on the left to report your first civic issue.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead className="uppercase border-b-2 bg-gray-50 text-gray-600">
+                <tr>
+                  <th className="px-4 py-3 font-semibold">ID</th>
+                  <th className="px-4 py-3 font-semibold">Issue Snippet</th>
+                  <th className="px-4 py-3 font-semibold">Status</th>
+                  <th className="px-4 py-3 font-semibold text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody>
               {complaints.map((c) => (
                 <React.Fragment key={c.id}>
                   <tr className={`border-b hover:bg-gray-50 transition-colors ${expandedId === c.id ? 'bg-blue-50' : ''}`}>
@@ -340,6 +374,7 @@ export default function CitizenDashboard() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
     </div>
   );
