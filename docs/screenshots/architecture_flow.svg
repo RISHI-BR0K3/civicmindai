@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" width="100%" height="100%" style="background:#0f172a; border-radius:12px; font-family:'Segoe UI',system-ui,sans-serif;">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#a855f7"/>
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="8" stdDeviation="6" flood-color="#000000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1000" height="620" fill="url(#bgGrad)"/>
+
+  <!-- Window Header -->
+  <rect x="0" y="0" width="1000" height="42" fill="#1e293b"/>
+  <circle cx="24" cy="21" r="6" fill="#ef4444"/>
+  <circle cx="44" cy="21" r="6" fill="#f59e0b"/>
+  <circle cx="64" cy="21" r="6" fill="#10b981"/>
+  <text x="500" y="26" fill="#94a3b8" font-size="13" font-weight="600" text-anchor="middle">CivicMind AI — System Architecture &amp; Data Pipeline</text>
+
+  <!-- Top Title Bar -->
+  <text x="500" y="80" fill="#ffffff" font-size="24" font-weight="800" text-anchor="middle">END-TO-END INTELLIGENT CIVIC PIPELINE</text>
+  <text x="500" y="104" fill="#818cf8" font-size="14" font-weight="600" text-anchor="middle">"Predict • Prioritize • Prevent"</text>
+
+  <!-- Step 1: Citizen Client -->
+  <g transform="translate(40, 140)" filter="url(#shadow)">
+    <rect width="260" height="420" rx="10" fill="url(#cardGrad)" stroke="#334155" stroke-width="1.5"/>
+    <rect width="260" height="42" rx="10" fill="#4338ca"/>
+    <text x="130" y="26" fill="#ffffff" font-size="14" font-weight="700" text-anchor="middle">1. Citizen Client Portal</text>
+    <text x="20" y="70" fill="#38bdf8" font-size="13" font-weight="700">React 18 + Vite SPA</text>
+    <text x="20" y="95" fill="#cbd5e1" font-size="12">• Dual-Tab JWT Auth &amp; Profile</text>
+    <text x="20" y="120" fill="#cbd5e1" font-size="12">• Leaflet GPS Map (Centering India)</text>
+    <text x="20" y="145" fill="#cbd5e1" font-size="12">• OpenStreetMap Geocoding</text>
+    <text x="20" y="170" fill="#cbd5e1" font-size="12">• WebRTC Live Camera Capture</text>
+    <text x="20" y="195" fill="#cbd5e1" font-size="12">• Isolated Submission History</text>
+
+    <!-- Mini UI Box -->
+    <rect x="20" y="225" width="220" height="160" rx="6" fill="#0f172a" stroke="#475569" stroke-width="1"/>
+    <text x="30" y="250" fill="#94a3b8" font-size="11" font-weight="600">POST /api/complaints/</text>
+    <rect x="30" y="262" width="200" height="18" rx="3" fill="#1e293b"/>
+    <text x="36" y="275" fill="#e2e8f0" font-size="10">"Water pipe bursting on Main St"</text>
+    <rect x="30" y="288" width="95" height="18" rx="3" fill="#1e293b"/>
+    <text x="36" y="301" fill="#38bdf8" font-size="9">Lat: 20.5937</text>
+    <rect x="135" y="288" width="95" height="18" rx="3" fill="#1e293b"/>
+    <text x="141" y="301" fill="#38bdf8" font-size="9">Lng: 78.9629</text>
+    <rect x="30" y="315" width="200" height="24" rx="3" fill="#1e293b"/>
+    <text x="36" y="331" fill="#a7f3d0" font-size="9">Base64 JPEG Camera Buffer</text>
+    <rect x="30" y="348" width="200" height="26" rx="4" fill="url(#accentGrad)"/>
+    <text x="130" y="365" fill="#ffffff" font-size="11" font-weight="700" text-anchor="middle">SUBMIT COMPLAINT</text>
+  </g>
+
+  <!-- Flow Arrow 1 -> 2 -->
+  <path d="M 305 350 L 365 350" stroke="#818cf8" stroke-width="3" stroke-dasharray="6,4" fill="none"/>
+  <polygon points="365,345 375,350 365,355" fill="#818cf8"/>
+  <text x="337" y="338" fill="#c7d2fe" font-size="10" font-weight="600" text-anchor="middle">REST / JSON</text>
+
+  <!-- Step 2: Backend & AI Engine -->
+  <g transform="translate(370, 140)" filter="url(#shadow)">
+    <rect width="260" height="420" rx="10" fill="url(#cardGrad)" stroke="#334155" stroke-width="1.5"/>
+    <rect width="260" height="42" rx="10" fill="#6d28d9"/>
+    <text x="130" y="26" fill="#ffffff" font-size="14" font-weight="700" text-anchor="middle">2. FastAPI &amp; AI Engine</text>
+    <text x="20" y="70" fill="#a78bfa" font-size="13" font-weight="700">Python 3.12 Backend</text>
+    
+    <!-- AI Module 1 -->
+    <rect x="15" y="85" width="230" height="100" rx="6" fill="#1e1b4b" stroke="#7c3aed" stroke-width="1"/>
+    <text x="25" y="105" fill="#c4b5fd" font-size="12" font-weight="700">🧠 NLP Department Routing</text>
+    <text x="25" y="123" fill="#e2e8f0" font-size="10">Model: TF-IDF Vectorizer + Naive Bayes</text>
+    <text x="25" y="139" fill="#94a3b8" font-size="10">Extracts n-grams, outputs department:</text>
+    <rect x="25" y="148" width="130" height="22" rx="3" fill="#065f46"/>
+    <text x="32" y="163" fill="#a7f3d0" font-size="10" font-weight="700">Water &amp; Sanitation</text>
+    <text x="165" y="163" fill="#34d399" font-size="10">(&lt; 1ms)</text>
+
+    <!-- AI Module 2 -->
+    <rect x="15" y="195" width="230" height="110" rx="6" fill="#1e1b4b" stroke="#7c3aed" stroke-width="1"/>
+    <text x="25" y="215" fill="#c4b5fd" font-size="12" font-weight="700">🔥 DBSCAN Hotspot Clustering</text>
+    <text x="25" y="233" fill="#e2e8f0" font-size="10">Density Spatial Clustering (ε=0.005, MinPts=3)</text>
+    <text x="25" y="249" fill="#94a3b8" font-size="10">• Purges resolved complaints</text>
+    <text x="25" y="265" fill="#94a3b8" font-size="10">• Calculates cluster centers &amp; counts</text>
+    <text x="25" y="281" fill="#f87171" font-size="10" font-weight="700">Severity: High (Count ≥ 5)</text>
+
+    <!-- DB Storage Box -->
+    <rect x="15" y="315" width="230" height="85" rx="6" fill="#0f172a" stroke="#38bdf8" stroke-width="1"/>
+    <text x="25" y="335" fill="#38bdf8" font-size="12" font-weight="700">🗄️ SQLite Engine (civic_app.db)</text>
+    <text x="25" y="353" fill="#cbd5e1" font-size="10">SQLAlchemy ORM + Dynamic Migrations</text>
+    <text x="25" y="369" fill="#94a3b8" font-size="10">Tables: users | departments | complaints | hotspots</text>
+    <text x="25" y="385" fill="#6ee7b7" font-size="9">✓ ACID Compliant &amp; Relational Isolation</text>
+  </g>
+
+  <!-- Flow Arrow 2 -> 3 -->
+  <path d="M 635 350 L 695 350" stroke="#818cf8" stroke-width="3" stroke-dasharray="6,4" fill="none"/>
+  <polygon points="695,345 705,350 695,355" fill="#818cf8"/>
+  <text x="667" y="338" fill="#c7d2fe" font-size="10" font-weight="600" text-anchor="middle">Live Sync</text>
+
+  <!-- Step 3: Municipal Action Portals -->
+  <g transform="translate(700, 140)" filter="url(#shadow)">
+    <rect width="260" height="420" rx="10" fill="url(#cardGrad)" stroke="#334155" stroke-width="1.5"/>
+    <rect width="260" height="42" rx="10" fill="#059669"/>
+    <text x="130" y="26" fill="#ffffff" font-size="14" font-weight="700" text-anchor="middle">3. Municipal Authority Portals</text>
+    
+    <!-- Officer Portal Card -->
+    <rect x="15" y="60" width="230" height="155" rx="6" fill="#064e3b" stroke="#10b981" stroke-width="1"/>
+    <text x="25" y="80" fill="#6ee7b7" font-size="12" font-weight="700">👮 Field Officer Dashboard</text>
+    <text x="25" y="98" fill="#e2e8f0" font-size="10">• Municipal Triage Queue</text>
+    <text x="25" y="114" fill="#e2e8f0" font-size="10">• Citizen Contact Card (Phone / Email)</text>
+    <rect x="25" y="124" width="210" height="24" rx="4" fill="#2563eb"/>
+    <text x="130" y="140" fill="#ffffff" font-size="10" font-weight="700" text-anchor="middle">🗺️ 1-Click Google Maps Routing</text>
+    <rect x="25" y="154" width="210" height="24" rx="4" fill="#15803d"/>
+    <text x="130" y="170" fill="#ffffff" font-size="10" font-weight="700" text-anchor="middle">✓ Status Update (Auto DBSCAN Evict)</text>
+    <text x="25" y="196" fill="#a7f3d0" font-size="9">Resolving clears active hotspot instantly</text>
+
+    <!-- Admin Portal Card -->
+    <rect x="15" y="230" width="230" height="170" rx="6" fill="#1e293b" stroke="#6366f1" stroke-width="1"/>
+    <text x="25" y="250" fill="#a5b4fc" font-size="12" font-weight="700">👑 Admin Master Control</text>
+    <text x="25" y="268" fill="#e2e8f0" font-size="10">• City-Wide KPIs &amp; Real-Time Stats</text>
+    <text x="25" y="284" fill="#e2e8f0" font-size="10">• Live India DBSCAN Hotspot Heatmap</text>
+    <text x="25" y="300" fill="#e2e8f0" font-size="10">• Split User Management (Managers/Citizens)</text>
+    <text x="25" y="316" fill="#e2e8f0" font-size="10">• Role Promotion / Demotion Controls</text>
+    <text x="25" y="332" fill="#e2e8f0" font-size="10">• Master Database Audit &amp; Cleanup</text>
+    <rect x="25" y="348" width="210" height="22" rx="3" fill="#4338ca"/>
+    <text x="130" y="363" fill="#e0e7ff" font-size="10" font-weight="600" text-anchor="middle">Proactive Governance Dashboard</text>
+  </g>
+
+  <!-- Bottom Subtitle / Flow indicator -->
+  <text x="500" y="595" fill="#64748b" font-size="12" text-anchor="middle">CivicMind AI Architecture — Asynchronous, Portable, Resilient, and Sub-Millisecond AI-Powered Municipal Operations</text>
+</svg>
